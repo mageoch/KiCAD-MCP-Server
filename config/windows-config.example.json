@@ -1,15 +1,13 @@
 {
   "mcpServers": {
     "kicad": {
-      "command": "node",
-      "args": ["C:\\Users\\YOUR_USERNAME\\MCP\\KiCAD-MCP-Server\\dist\\index.js"],
+      "command": "uv",
+      "args": ["--directory", "C:\\Users\\YOUR_USERNAME\\MCP\\KiCAD-MCP-Server", "run", "python", "python\\kicad_interface.py"],
       "env": {
-        "NODE_ENV": "production",
-        "PYTHONPATH": "C:\\Program Files\\KiCad\\9.0\\bin\\Lib\\site-packages",
-        "LOG_LEVEL": "info",
+        "PYTHONPATH": "C:\\Program Files\\KiCad\\9.0\\lib\\python3\\dist-packages",
         "KICAD_AUTO_LAUNCH": "false"
       },
-      "description": "KiCAD PCB Design Assistant - Note: PYTHONPATH auto-detected if venv exists"
+      "description": "KiCAD PCB Design Assistant"
     }
   }
 }

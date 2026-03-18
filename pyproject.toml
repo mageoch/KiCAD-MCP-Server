@@ -1,0 +1,62 @@
+[project]
+name = "kicad-mcp-server"
+version = "2.1.0"
+description = "MCP server for KiCAD PCB design automation"
+requires-python = ">=3.11"
+dependencies = [
+    "kicad-skip>=0.1.0",
+    "Pillow>=9.0.0",
+    "cairosvg>=2.7.0",
+    "colorlog>=6.7.0",
+    "pydantic>=2.5.0",
+    "requests>=2.32.5",
+    "python-dotenv>=1.0.0",
+    "typing-extensions>=4.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-mock>=3.11.0",
+    "black>=23.7.0",
+    "mypy>=1.5.0",
+    "pylint>=2.17.0",
+    "flake8>=6.1.0",
+    "isort>=5.12.0",
+    "types-requests>=2.31.0",
+    "types-Pillow>=10.0.0",
+    "pre-commit>=3.3.0",
+    "ipython>=8.14.0",
+    "ipdb>=0.13.13",
+]
+
+[tool.uv]
+# pcbnew is provided by the KiCAD installation and cannot be installed via pip.
+# Set PYTHONPATH to KiCAD's Python packages directory in your MCP config:
+#   Linux:   /usr/lib/kicad/lib/python3/dist-packages
+#   macOS:   /Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/lib/python3.11/site-packages
+#   Windows: C:\Program Files\KiCad\9.0\lib\python3\dist-packages
+package = false
+
+[tool.uv.sources]
+# No custom sources needed
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

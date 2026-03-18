@@ -20,6 +20,23 @@ class ComponentCommands:
         self.board = board
         self.library_manager = library_manager or LibraryManager()
 
+    @staticmethod
+    def _fp(item) -> Optional["pcbnew.FOOTPRINT"]:
+        """Cast a raw SWIG item to FOOTPRINT. Required because FindFootprintByReference
+        and GetFootprints() may return SwigPyObject without proper type binding."""
+        if item is None:
+            return None
+        try:
+            return pcbnew.Cast_to_FOOTPRINT(item)
+        except Exception:
+            return item  # already typed in newer binding versions
+
+    def _find_footprint(self, reference: str) -> Optional["pcbnew.FOOTPRINT"]:
+        """Look up a footprint by reference, always returning a typed FOOTPRINT."""
+        if not self.board:
+            return None
+        return self._fp(self.board.FindFootprintByReference(reference))
+
     def place_component(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Place a component on the PCB"""
         try:
@@ -179,7 +196,7 @@ class ComponentCommands:
                 }
 
             # Find the component
-            module = self.board.FindFootprintByReference(reference)
+            module = self._find_footprint(reference)
             if not module:
                 return {
                     "success": False,
@@ -241,7 +258,7 @@ class ComponentCommands:
                 }
 
             # Find the component
-            module = self.board.FindFootprintByReference(reference)
+            module = self._find_footprint(reference)
             if not module:
                 return {
                     "success": False,
@@ -270,8 +287,106 @@ class ComponentCommands:
                 "errorDetails": str(e)
             }
 
+    def _find_footprint_by_uuid(self, uuid_str: str):
+        """Find a FOOTPRINT object by UUID by parsing the PCB file.
+
+        Avoids SWIG binding issues where GetFootprints() may return raw
+        SwigPyObject items without the m_Uuid attribute properly exposed.
+        Reads the reference associated with the UUID from the file, then
+        looks up the footprint using the reliable FindFootprintByReference.
+        When multiple footprints share the same reference (duplicates), the
+        correct one is identified by iterating and comparing via str(fp.m_Uuid).
+        """
+        import re
+
+        if not self.board:
+            return None
+
+        pcb_path = self.board.GetFileName()
+        if not pcb_path:
+            logger.warning("Board has no filename; cannot search by UUID via file")
+            return None
+
+        try:
+            with open(pcb_path, "r", encoding="utf-8") as f:
+                content = f.read()
+        except OSError as e:
+            logger.error(f"Cannot read PCB file for UUID lookup: {e}")
+            return None
+
+        # Find the footprint block containing this UUID and extract its reference.
+        # PCB format: (footprint ... (uuid "xxxx-...") ... (property "Reference" "R1" ...) ...)
+        # We locate the uuid token first, then walk backward to the enclosing (footprint
+        # block to extract the Reference property within that block.
+        uuid_pattern = re.compile(r'\(uuid\s+"?' + re.escape(uuid_str) + r'"?\s*\)')
+        m = uuid_pattern.search(content)
+        if not m:
+            logger.warning(f"UUID {uuid_str} not found in PCB file")
+            return None
+
+        # Walk backward to find the start of the enclosing (footprint block
+        block_start = content.rfind("(footprint", 0, m.start())
+        if block_start < 0:
+            logger.warning(f"Could not find enclosing footprint block for UUID {uuid_str}")
+            return None
+
+        # Find the matching closing paren of that block
+        depth = 0
+        block_end = block_start
+        for i in range(block_start, len(content)):
+            if content[i] == "(":
+                depth += 1
+            elif content[i] == ")":
+                depth -= 1
+                if depth == 0:
+                    block_end = i
+                    break
+
+        block_text = content[block_start:block_end + 1]
+        ref_match = re.search(r'\(property\s+"Reference"\s+"([^"]+)"', block_text)
+        if not ref_match:
+            logger.warning(f"No Reference property found in footprint block for UUID {uuid_str}")
+            return None
+
+        reference = ref_match.group(1)
+        logger.info(f"UUID {uuid_str} belongs to reference {reference}")
+
+        # Now find the exact FOOTPRINT object. If multiple share the same reference,
+        # fall back to iterating and comparing UUIDs via str() which uses __str__.
+        module = self._find_footprint(reference)
+        if not module:
+            return None
+
+        # Verify UUID matches (handles duplicates by trying str() conversion)
+        try:
+            found_uuid = str(module.m_Uuid)
+            if found_uuid == uuid_str:
+                return module
+        except Exception:
+            pass
+
+        # If str() didn't match (or failed), iterate all footprints as a last resort
+        try:
+            for raw in self.board.GetFootprints():
+                fp = self._fp(raw)
+                if fp is None:
+                    continue
+                try:
+                    if str(fp.m_Uuid) == uuid_str:
+                        return fp
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+        # No SWIG match found but we know the reference — return by reference as fallback
+        logger.warning(
+            f"Could not verify UUID via SWIG; deleting by reference '{reference}' as fallback"
+        )
+        return module
+
     def delete_component(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Delete a component from the PCB"""
+        """Delete a component from the PCB by reference or UUID."""
         try:
             if not self.board:
                 return {
@@ -281,28 +396,40 @@ class ComponentCommands:
                 }
 
             reference = params.get("reference")
-            if not reference:
+            uuid_str = params.get("uuid")
+
+            if not reference and not uuid_str:
                 return {
                     "success": False,
-                    "message": "Missing reference",
-                    "errorDetails": "reference parameter is required"
+                    "message": "Missing identifier",
+                    "errorDetails": "Either 'reference' or 'uuid' parameter is required"
                 }
 
-            # Find the component
-            module = self.board.FindFootprintByReference(reference)
-            if not module:
-                return {
-                    "success": False,
-                    "message": "Component not found",
-                    "errorDetails": f"Could not find component: {reference}"
-                }
+            module = None
+            if uuid_str:
+                # Find by UUID via file parsing (avoids SWIG binding issues with m_Uuid)
+                module = self._find_footprint_by_uuid(uuid_str)
+                if not module:
+                    return {
+                        "success": False,
+                        "message": "Component not found",
+                        "errorDetails": f"No footprint with UUID: {uuid_str}"
+                    }
+            else:
+                module = self._find_footprint(reference)
+                if not module:
+                    return {
+                        "success": False,
+                        "message": "Component not found",
+                        "errorDetails": f"Could not find component: {reference}"
+                    }
 
-            # Remove from board
+            label = f"{module.GetReference()} (uuid={uuid_str or 'by-ref'})"
             self.board.Remove(module)
 
             return {
                 "success": True,
-                "message": f"Deleted component: {reference}"
+                "message": f"Deleted component: {label}"
             }
 
         except Exception as e:
@@ -336,7 +463,7 @@ class ComponentCommands:
                 }
 
             # Find the component
-            module = self.board.FindFootprintByReference(reference)
+            module = self._find_footprint(reference)
             if not module:
                 return {
                     "success": False,
@@ -400,7 +527,7 @@ class ComponentCommands:
                 }
 
             # Find the component
-            module = self.board.FindFootprintByReference(reference)
+            module = self._find_footprint(reference)
             if not module:
                 return {
                     "success": False,
@@ -453,7 +580,7 @@ class ComponentCommands:
                 }
 
             components = []
-            for module in self.board.GetFootprints():
+            for module in [m for raw in self.board.GetFootprints() if (m := self._fp(raw))]:
                 pos = module.GetPosition()
                 x_mm = pos.x / 1000000
                 y_mm = pos.y / 1000000
@@ -507,7 +634,7 @@ class ComponentCommands:
                 }
 
             matches = []
-            for module in self.board.GetFootprints():
+            for module in [m for raw in self.board.GetFootprints() if (m := self._fp(raw))]:
                 ref = module.GetReference().lower()
                 val = module.GetValue().lower()
                 fp = module.GetFPIDAsString().lower()
@@ -569,7 +696,7 @@ class ComponentCommands:
                 }
 
             # Find the component
-            module = self.board.FindFootprintByReference(reference)
+            module = self._find_footprint(reference)
             if not module:
                 return {
                     "success": False,
@@ -673,7 +800,7 @@ class ComponentCommands:
                 }
 
             # Find the component
-            module = self.board.FindFootprintByReference(reference)
+            module = self._find_footprint(reference)
             if not module:
                 return {
                     "success": False,
@@ -854,7 +981,7 @@ class ComponentCommands:
             # Find all referenced components
             components = []
             for ref in references:
-                module = self.board.FindFootprintByReference(ref)
+                module = self._find_footprint(ref)
                 if not module:
                     return {
                         "success": False,
@@ -937,7 +1064,7 @@ class ComponentCommands:
                 }
                 
             # Find the source component
-            source = self.board.FindFootprintByReference(reference)
+            source = self._find_footprint(reference)
             if not source:
                 return {
                     "success": False,
@@ -946,7 +1073,7 @@ class ComponentCommands:
                 }
                 
             # Check if new reference already exists
-            if self.board.FindFootprintByReference(new_reference):
+            if self._find_footprint(new_reference):
                 return {
                     "success": False,
                     "message": "Reference already exists",

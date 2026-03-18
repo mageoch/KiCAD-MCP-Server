@@ -22,6 +22,18 @@ class WireManager:
     """Manage wires in KiCad schematics using S-expression manipulation"""
 
     @staticmethod
+    def _find_insertion_index(sch_data: list) -> int:
+        """
+        Find the best insertion index for new schematic elements.
+        Prefers inserting before sheet_instances (main sheets).
+        Falls back to end of list for sub-schematics that lack sheet_instances.
+        """
+        for i, item in enumerate(sch_data):
+            if isinstance(item, list) and len(item) > 0 and item[0] == Symbol('sheet_instances'):
+                return i
+        return len(sch_data)
+
+    @staticmethod
     def add_wire(schematic_path: Path, start_point: List[float], end_point: List[float],
                  stroke_width: float = 0, stroke_type: str = 'default') -> bool:
         """
@@ -59,19 +71,9 @@ class WireManager:
                 [Symbol('uuid'), str(uuid.uuid4())]
             ]
 
-            # Find insertion point (before sheet_instances)
-            sheet_instances_index = None
-            for i, item in enumerate(sch_data):
-                if isinstance(item, list) and len(item) > 0 and item[0] == Symbol('sheet_instances'):
-                    sheet_instances_index = i
-                    break
-
-            if sheet_instances_index is None:
-                logger.error("No sheet_instances section found in schematic")
-                return False
-
-            # Insert wire before sheet_instances
-            sch_data.insert(sheet_instances_index, wire_sexp)
+            # Find insertion point
+            insertion_index = WireManager._find_insertion_index(sch_data)
+            sch_data.insert(insertion_index, wire_sexp)
             logger.info(f"Injected wire from {start_point} to {end_point}")
 
             # Write back
@@ -131,18 +133,8 @@ class WireManager:
             ]
 
             # Find insertion point
-            sheet_instances_index = None
-            for i, item in enumerate(sch_data):
-                if isinstance(item, list) and len(item) > 0 and item[0] == Symbol('sheet_instances'):
-                    sheet_instances_index = i
-                    break
-
-            if sheet_instances_index is None:
-                logger.error("No sheet_instances section found in schematic")
-                return False
-
-            # Insert wire
-            sch_data.insert(sheet_instances_index, wire_sexp)
+            insertion_index = WireManager._find_insertion_index(sch_data)
+            sch_data.insert(insertion_index, wire_sexp)
             logger.info(f"Injected polyline wire with {len(points)} points")
 
             # Write back
@@ -197,18 +189,8 @@ class WireManager:
             ]
 
             # Find insertion point
-            sheet_instances_index = None
-            for i, item in enumerate(sch_data):
-                if isinstance(item, list) and len(item) > 0 and item[0] == Symbol('sheet_instances'):
-                    sheet_instances_index = i
-                    break
-
-            if sheet_instances_index is None:
-                logger.error("No sheet_instances section found in schematic")
-                return False
-
-            # Insert label
-            sch_data.insert(sheet_instances_index, label_sexp)
+            insertion_index = WireManager._find_insertion_index(sch_data)
+            sch_data.insert(insertion_index, label_sexp)
             logger.info(f"Injected label '{text}' at {position}")
 
             # Write back
@@ -256,18 +238,8 @@ class WireManager:
             ]
 
             # Find insertion point
-            sheet_instances_index = None
-            for i, item in enumerate(sch_data):
-                if isinstance(item, list) and len(item) > 0 and item[0] == Symbol('sheet_instances'):
-                    sheet_instances_index = i
-                    break
-
-            if sheet_instances_index is None:
-                logger.error("No sheet_instances section found in schematic")
-                return False
-
-            # Insert junction
-            sch_data.insert(sheet_instances_index, junction_sexp)
+            insertion_index = WireManager._find_insertion_index(sch_data)
+            sch_data.insert(insertion_index, junction_sexp)
             logger.info(f"Injected junction at {position}")
 
             # Write back
@@ -312,18 +284,8 @@ class WireManager:
             ]
 
             # Find insertion point
-            sheet_instances_index = None
-            for i, item in enumerate(sch_data):
-                if isinstance(item, list) and len(item) > 0 and item[0] == Symbol('sheet_instances'):
-                    sheet_instances_index = i
-                    break
-
-            if sheet_instances_index is None:
-                logger.error("No sheet_instances section found in schematic")
-                return False
-
-            # Insert no_connect
-            sch_data.insert(sheet_instances_index, no_connect_sexp)
+            insertion_index = WireManager._find_insertion_index(sch_data)
+            sch_data.insert(insertion_index, no_connect_sexp)
             logger.info(f"Injected no-connect at {position}")
 
             # Write back

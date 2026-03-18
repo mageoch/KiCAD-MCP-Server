@@ -462,6 +462,58 @@ class ExportCommands:
                 "errorDetails": str(e),
             }
 
+    def _load_schematic_lcsc_map(self) -> Dict[str, str]:
+        """Parse the project schematic(s) to build a reference → LCSC part number map."""
+        lcsc_map: Dict[str, str] = {}
+        board_file = self.board.GetFileName()
+        logger.info(f"BOM LCSC map: board_file={board_file!r}")
+        if not board_file:
+            logger.warning("BOM LCSC map: board has no filename, skipping schematic parse")
+            return lcsc_map
+
+        project_dir = os.path.dirname(os.path.abspath(board_file))
+        sch_files = [
+            os.path.join(project_dir, f)
+            for f in os.listdir(project_dir)
+            if f.endswith(".kicad_sch")
+        ]
+        logger.info(f"BOM LCSC map: project_dir={project_dir!r}, sch_files={sch_files}")
+        if not sch_files:
+            logger.warning("BOM LCSC map: no .kicad_sch files found")
+            return lcsc_map
+
+        try:
+            from skip import Schematic  # kicad-skip
+
+            # kicad-skip normalizes field names: spaces → underscores
+            lcsc_field_names = ["LCSC_Part", "LCSC Part", "LCSC", "lcsc", "Supplier_Part", "Supplier Part"]
+
+            for sch_file in sch_files:
+                try:
+                    sch = Schematic(sch_file)
+                    for symbol in sch.symbol:
+                        try:
+                            ref = symbol.property.Reference.value
+                            lcsc = ""
+                            for name in lcsc_field_names:
+                                if name in symbol.property:
+                                    val = symbol.property[name].value
+                                    if val and val not in ("~", ""):
+                                        lcsc = val
+                                        break
+                            if ref and lcsc:
+                                lcsc_map[ref] = lcsc
+                        except Exception:
+                            continue
+                    logger.info(f"BOM LCSC map: parsed {sch_file}, found {len(lcsc_map)} entries so far")
+                except Exception as e:
+                    logger.warning(f"Could not parse schematic {sch_file}: {e}")
+        except ImportError:
+            logger.warning("kicad-skip not available, LCSC field will be empty")
+
+        logger.info(f"BOM LCSC map: final map has {len(lcsc_map)} entries: {lcsc_map}")
+        return lcsc_map
+
     def export_bom(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Export Bill of Materials"""
         try:
@@ -473,7 +525,7 @@ class ExportCommands:
                 }
 
             output_path = params.get("outputPath")
-            format = params.get("format", "CSV")
+            format = params.get("format", "CSV").upper()
             group_by_value = params.get("groupByValue", True)
             include_attributes = params.get("includeAttributes", [])
 
@@ -488,13 +540,18 @@ class ExportCommands:
             output_path = os.path.abspath(os.path.expanduser(output_path))
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
+            # Build reference → LCSC map from schematic
+            lcsc_map = self._load_schematic_lcsc_map()
+
             # Get all components
             components = []
             for module in self.board.GetFootprints():
+                ref = module.GetReference()
                 component = {
-                    "reference": module.GetReference(),
+                    "reference": ref,
                     "value": module.GetValue(),
                     "footprint": module.GetFPID().GetUniStringLibId(),
+                    "lcsc": lcsc_map.get(ref, ""),
                     "layer": self.board.GetLayerName(module.GetLayer()),
                 }
 
@@ -509,11 +566,12 @@ class ExportCommands:
             if group_by_value:
                 grouped = {}
                 for comp in components:
-                    key = f"{comp['value']}_{comp['footprint']}"
+                    key = f"{comp['value']}_{comp['footprint']}_{comp['lcsc']}"
                     if key not in grouped:
                         grouped[key] = {
                             "value": comp["value"],
                             "footprint": comp["footprint"],
+                            "lcsc": comp["lcsc"],
                             "quantity": 1,
                             "references": [comp["reference"]],
                         }

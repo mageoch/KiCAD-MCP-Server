@@ -397,16 +397,19 @@ COMPONENT_TOOLS = [
     {
         "name": "delete_component",
         "title": "Delete Component",
-        "description": "Removes a component from the board.",
+        "description": "Removes a component from the board by reference designator or UUID. Use 'uuid' to target a specific duplicate when multiple footprints share the same reference.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "reference": {
                     "type": "string",
-                    "description": "Component reference designator"
+                    "description": "Component reference designator (e.g. R1, U3). Required if uuid is not provided."
+                },
+                "uuid": {
+                    "type": "string",
+                    "description": "Footprint UUID (e.g. e1c7fd3a-b5c6-400a-a8e5-6d3e8528e5f4). Use this to delete a specific duplicate without affecting other footprints with the same reference."
                 }
-            },
-            "required": ["reference"]
+            }
         }
     },
     {
@@ -1501,6 +1504,42 @@ SCHEMATIC_TOOLS = [
                     "items": {"type": "string"}
                 }
             }
+        }
+    },
+    {
+        "name": "edit_schematic_component",
+        "title": "Edit Schematic Component Properties",
+        "description": "Updates properties of a placed symbol in a schematic. Supports standard fields (value, footprint, reference) and arbitrary custom fields (e.g. LCSC Part, Manufacturer Part). Existing fields are updated in-place; new fields are appended as hidden properties.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "schematicPath": {
+                    "type": "string",
+                    "description": "Absolute path to the .kicad_sch file"
+                },
+                "reference": {
+                    "type": "string",
+                    "description": "Reference designator of the component to edit (e.g. R1, U3)"
+                },
+                "value": {
+                    "type": "string",
+                    "description": "New Value field (e.g. 10k, STM32F401)"
+                },
+                "footprint": {
+                    "type": "string",
+                    "description": "New Footprint field (library:name)"
+                },
+                "newReference": {
+                    "type": "string",
+                    "description": "New reference designator (renames the component)"
+                },
+                "properties": {
+                    "type": "object",
+                    "description": "Arbitrary custom fields to set (e.g. {\"LCSC Part\": \"C25768\", \"Manufacturer Part\": \"0402WGF2202TCE\"}). Existing fields are updated; missing fields are created as hidden.",
+                    "additionalProperties": {"type": "string"}
+                }
+            },
+            "required": ["schematicPath", "reference"]
         }
     },
     {
