@@ -336,9 +336,8 @@ class WireManager:
 if __name__ == '__main__':
     # Test wire creation
     import sys
-    sys.path.insert(0, '/home/chris/MCP/KiCAD-MCP-Server/python')
+    sys.path.insert(0, str(Path(__file__).parent.parent))
 
-    from pathlib import Path
     import shutil
 
     print("=" * 80)
@@ -347,7 +346,7 @@ if __name__ == '__main__':
 
     # Create test schematic (cross-platform temp directory)
     test_path = Path(tempfile.gettempdir()) / 'test_wire_manager.kicad_sch'
-    template_path = Path('/home/chris/MCP/KiCAD-MCP-Server/python/templates/empty.kicad_sch')
+    template_path = Path(__file__).parent.parent / 'templates' / 'empty.kicad_sch'
 
     shutil.copy(template_path, test_path)
     print(f"\n✓ Created test schematic: {test_path}")

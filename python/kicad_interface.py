@@ -216,6 +216,7 @@ try:
     from commands.component_schematic import ComponentManager
     from commands.connection_schematic import ConnectionManager
     from commands.library_schematic import LibraryManager as SchematicLibraryManager
+    from commands.schematic_kiutils import SchematicEditor
     from commands.library import (
         LibraryManager as FootprintLibraryManager,
         LibraryCommands,
@@ -323,6 +324,7 @@ class KiCADInterface:
             "copy_routing_pattern": self.routing_commands.copy_routing_pattern,
             "get_nets_list": self.routing_commands.get_nets_list,
             "create_netclass": self.routing_commands.create_netclass,
+            "assign_net_to_class": self.routing_commands.assign_net_to_class,
             "add_copper_pour": self.routing_commands.add_copper_pour,
             "route_differential_pair": self.routing_commands.route_differential_pair,
             "refill_zones": self._handle_refill_zones,
@@ -347,22 +349,26 @@ class KiCADInterface:
             "search_symbols": self.symbol_library_commands.search_symbols,
             "list_library_symbols": self.symbol_library_commands.list_library_symbols,
             "get_symbol_info": self.symbol_library_commands.get_symbol_info,
-            # Schematic commands
+            # Schematic commands (kiutils-based)
             "create_schematic": self._handle_create_schematic,
             "load_schematic": self._handle_load_schematic,
+            "list_schematic_components": self._handle_list_schematic_components,
             "add_schematic_component": self._handle_add_schematic_component,
-            "delete_schematic_component": self._handle_delete_schematic_component,
             "edit_schematic_component": self._handle_edit_schematic_component,
+            "delete_schematic_component": self._handle_delete_schematic_component,
             "add_schematic_wire": self._handle_add_schematic_wire,
-            "add_schematic_connection": self._handle_add_schematic_connection,
             "add_schematic_net_label": self._handle_add_schematic_net_label,
-            "connect_to_net": self._handle_connect_to_net,
-            "connect_passthrough": self._handle_connect_passthrough,
+            "add_schematic_junction": self._handle_add_schematic_junction,
+            "add_schematic_connection": self._handle_add_schematic_junction,  # legacy alias
+            "add_schematic_no_connect": self._handle_add_schematic_no_connect,
             "get_schematic_pin_locations": self._handle_get_schematic_pin_locations,
             "get_net_connections": self._handle_get_net_connections,
             "run_erc": self._handle_run_erc,
+            "annotate_schematic": self._handle_annotate_schematic,
+            "clear_annotation": self._handle_clear_annotation,
             "generate_netlist": self._handle_generate_netlist,
             "sync_schematic_to_board": self._handle_sync_schematic_to_board,
+            "replace_schematic_symbol": self._handle_replace_schematic_symbol,
             "list_schematic_libraries": self._handle_list_schematic_libraries,
             "export_schematic_pdf": self._handle_export_schematic_pdf,
             "import_svg_logo": self._handle_import_svg_logo,
@@ -509,6 +515,7 @@ class KiCADInterface:
         "add_board_outline", "add_mounting_hole", "add_text", "add_board_text",
         "add_copper_pour", "refill_zones", "import_svg_logo",
         "sync_schematic_to_board", "connect_passthrough",
+        "create_netclass", "assign_net_to_class",
     }
 
     def _auto_save_board(self):
@@ -536,65 +543,43 @@ class KiCADInterface:
         self.export_commands.board = self.board
 
     # Schematic command handlers
+    # ================================================================== #
+    #  Schematic handlers — kiutils-based                                #
+    # ================================================================== #
+
     def _handle_create_schematic(self, params):
-        """Create a new schematic"""
+        """Create a new empty schematic file."""
         logger.info("Creating schematic")
-        try:
-            # Support multiple parameter naming conventions for compatibility:
-            # - TypeScript tools use: name, path
-            # - Python schema uses: filename, title
-            # - Legacy uses: projectName, path, metadata
-            project_name = (
-                params.get("projectName") or params.get("name") or params.get("title")
-            )
-
-            # Handle filename parameter - it may contain full path
-            filename = params.get("filename")
-            if filename:
-                # If filename provided, extract name and path from it
-                if filename.endswith(".kicad_sch"):
-                    filename = filename[:-10]  # Remove .kicad_sch extension
-                path = os.path.dirname(filename) or "."
-                project_name = project_name or os.path.basename(filename)
-            else:
-                path = params.get("path", ".")
-            metadata = params.get("metadata", {})
-
-            if not project_name:
-                return {
-                    "success": False,
-                    "message": "Schematic name is required. Provide 'name', 'projectName', or 'filename' parameter.",
-                }
-
-            schematic = SchematicManager.create_schematic(project_name, metadata)
-            file_path = f"{path}/{project_name}.kicad_sch"
-            success = SchematicManager.save_schematic(schematic, file_path)
-
-            return {"success": success, "file_path": file_path}
-        except Exception as e:
-            logger.error(f"Error creating schematic: {str(e)}")
-            return {"success": False, "message": str(e)}
+        filename = params.get("filename")
+        if not filename:
+            # Legacy: accept name/projectName + path
+            name = params.get("projectName") or params.get("name")
+            if not name:
+                return {"success": False, "message": "'filename' is required"}
+            path = params.get("path", ".")
+            filename = f"{path}/{name}.kicad_sch"
+        if not filename.endswith(".kicad_sch"):
+            filename += ".kicad_sch"
+        return SchematicEditor.create(
+            filename,
+            title=params.get("title", ""),
+            overwrite=bool(params.get("overwrite", True)),
+        )
 
     def _handle_load_schematic(self, params):
-        """Load an existing schematic"""
+        """Load a schematic and return its contents summary."""
         logger.info("Loading schematic")
-        try:
-            filename = params.get("filename")
+        filename = params.get("filename")
+        if not filename:
+            return {"success": False, "message": "'filename' is required"}
+        return SchematicEditor.load(filename)
 
-            if not filename:
-                return {"success": False, "message": "Filename is required"}
-
-            schematic = SchematicManager.load_schematic(filename)
-            success = schematic is not None
-
-            if success:
-                metadata = SchematicManager.get_schematic_metadata(schematic)
-                return {"success": success, "metadata": metadata}
-            else:
-                return {"success": False, "message": "Failed to load schematic"}
-        except Exception as e:
-            logger.error(f"Error loading schematic: {str(e)}")
-            return {"success": False, "message": str(e)}
+    def _handle_list_schematic_components(self, params):
+        """List all placed components in a schematic."""
+        path = params.get("schematicPath")
+        if not path:
+            return {"success": False, "message": "'schematicPath' is required"}
+        return SchematicEditor.list_components(path)
 
     def _handle_place_component(self, params):
         """Place a component on the PCB, with project-local fp-lib-table support.
@@ -638,385 +623,167 @@ class KiCADInterface:
         return self.component_commands.place_component(params)
 
     def _handle_add_schematic_component(self, params):
-        """Add a component to a schematic using text-based injection (no sexpdata)"""
+        """Add a component from a KiCAD symbol library to the schematic."""
         logger.info("Adding component to schematic")
-        try:
-            from pathlib import Path
-            from commands.dynamic_symbol_loader import DynamicSymbolLoader
+        path = params.get("schematicPath")
+        if not path:
+            return {"success": False, "message": "'schematicPath' is required"}
 
-            schematic_path = params.get("schematicPath")
-            component = params.get("component", {})
+        # Accept either explicit library/symbol params OR legacy "symbol" = "Library:Name"
+        library = params.get("library", "")
+        symbol  = params.get("symbol", "")
+        if not library and ":" in symbol:
+            library, symbol = symbol.split(":", 1)
+        if not library:
+            # Legacy: check component sub-dict
+            comp = params.get("component", {})
+            library = comp.get("library", "Device")
+            symbol  = comp.get("type") or comp.get("symbol") or symbol or "R"
+            params.setdefault("reference", comp.get("reference", "X?"))
+            params.setdefault("value",     comp.get("value", symbol))
+            params.setdefault("x",         comp.get("x", 0))
+            params.setdefault("y",         comp.get("y", 0))
+            params.setdefault("footprint", comp.get("footprint", ""))
 
-            if not schematic_path:
-                return {"success": False, "message": "Schematic path is required"}
-            if not component:
-                return {"success": False, "message": "Component definition is required"}
+        reference = params.get("reference", "X?")
+        value     = params.get("value", symbol)
+        x         = float(params.get("x", 0))
+        y         = float(params.get("y", 0))
 
-            comp_type = component.get("type", "R")
-            library = component.get("library", "Device")
-            reference = component.get("reference", "X?")
-            value = component.get("value", comp_type)
-            footprint = component.get("footprint", "")
-            x = component.get("x", 0)
-            y = component.get("y", 0)
-
-            # Derive project path from schematic path for project-local library resolution
-            schematic_file = Path(schematic_path)
-            derived_project_path = schematic_file.parent
-
-            loader = DynamicSymbolLoader(project_path=derived_project_path)
-            loader.add_component(
-                schematic_file,
-                library,
-                comp_type,
-                reference=reference,
-                value=value,
-                footprint=footprint,
-                x=x,
-                y=y,
-                project_path=derived_project_path,
-            )
-
-            return {
-                "success": True,
-                "component_reference": reference,
-                "symbol_source": f"{library}:{comp_type}",
-            }
-        except Exception as e:
-            logger.error(f"Error adding component to schematic: {str(e)}")
-            import traceback
-
-            logger.error(traceback.format_exc())
-            return {"success": False, "message": str(e)}
+        return SchematicEditor.add_component(
+            path          = path,
+            library       = library,
+            symbol        = symbol,
+            reference     = reference,
+            value         = value,
+            x             = x,
+            y             = y,
+            footprint     = params.get("footprint", ""),
+            rotation      = float(params.get("rotation", 0)),
+            mirror        = params.get("mirror", ""),
+            datasheet     = params.get("datasheet", ""),
+            extra_properties = params.get("properties"),
+            hide_reference = bool(params.get("hideReference", False)),
+            hide_value     = bool(params.get("hideValue", False)),
+            dnp            = bool(params.get("dnp", False)),
+        )
 
     def _handle_delete_schematic_component(self, params):
-        """Remove a placed symbol from a schematic using text-based manipulation (no skip writes)"""
+        """Remove a placed symbol from the schematic."""
         logger.info("Deleting schematic component")
-        try:
-            from pathlib import Path
-            import re
-
-            schematic_path = params.get("schematicPath")
-            reference = params.get("reference")
-
-            if not schematic_path:
-                return {"success": False, "message": "schematicPath is required"}
-            if not reference:
-                return {"success": False, "message": "reference is required"}
-
-            sch_file = Path(schematic_path)
-            if not sch_file.exists():
-                return {
-                    "success": False,
-                    "message": f"Schematic not found: {schematic_path}",
-                }
-
-            with open(sch_file, "r", encoding="utf-8") as f:
-                lines = f.read().split("\n")
-
-            # Find lib_symbols range to skip it
-            lib_sym_start, lib_sym_end = None, None
-            depth = 0
-            for i, line in enumerate(lines):
-                if "(lib_symbols" in line and lib_sym_start is None:
-                    lib_sym_start = i
-                    depth = sum(1 for c in line if c == "(") - sum(
-                        1 for c in line if c == ")"
-                    )
-                elif lib_sym_start is not None and lib_sym_end is None:
-                    depth += sum(1 for c in line if c == "(") - sum(
-                        1 for c in line if c == ")"
-                    )
-                    if depth == 0:
-                        lib_sym_end = i
-                        break
-
-            # Find ALL placed symbol blocks matching the reference (handles duplicates)
-            blocks_to_delete = []
-            i = 0
-            while i < len(lines):
-                # Skip lib_symbols
-                if lib_sym_start is not None and lib_sym_end is not None:
-                    if lib_sym_start <= i <= lib_sym_end:
-                        i += 1
-                        continue
-
-                if re.match(r"\s*\(symbol\s+\(lib_id\s+\"", lines[i]):
-                    b_start = i
-                    b_depth = sum(1 for c in lines[i] if c == "(") - sum(
-                        1 for c in lines[i] if c == ")"
-                    )
-                    j = i + 1
-                    while j < len(lines) and b_depth > 0:
-                        b_depth += sum(1 for c in lines[j] if c == "(") - sum(
-                            1 for c in lines[j] if c == ")"
-                        )
-                        j += 1
-                    b_end = j - 1
-
-                    block_text = "\n".join(lines[b_start : b_end + 1])
-                    if re.search(
-                        r'\(property\s+"Reference"\s+"' + re.escape(reference) + r'"',
-                        block_text,
-                    ):
-                        blocks_to_delete.append((b_start, b_end))
-
-                    i = b_end + 1
-                    continue
-
-                i += 1
-
-            if not blocks_to_delete:
-                return {
-                    "success": False,
-                    "message": f"Component '{reference}' not found in schematic (note: this tool removes schematic symbols, use delete_component for PCB footprints)",
-                }
-
-            # Delete from back to front to preserve line indices
-            for b_start, b_end in sorted(blocks_to_delete, reverse=True):
-                del lines[b_start : b_end + 1]
-                if b_start < len(lines) and lines[b_start].strip() == "":
-                    del lines[b_start]
-
-            with open(sch_file, "w", encoding="utf-8") as f:
-                f.write("\n".join(lines))
-
-            deleted_count = len(blocks_to_delete)
-            logger.info(
-                f"Deleted {deleted_count} instance(s) of {reference} from {sch_file.name}"
-            )
-            return {
-                "success": True,
-                "reference": reference,
-                "deleted_count": deleted_count,
-                "schematic": str(sch_file),
-            }
-
-        except Exception as e:
-            logger.error(f"Error deleting schematic component: {e}")
-            import traceback
-
-            logger.error(traceback.format_exc())
-            return {"success": False, "message": str(e)}
+        path = params.get("schematicPath")
+        ref  = params.get("reference")
+        if not path:
+            return {"success": False, "message": "'schematicPath' is required"}
+        if not ref:
+            return {"success": False, "message": "'reference' is required"}
+        return SchematicEditor.delete_component(path, ref)
 
     def _handle_edit_schematic_component(self, params):
-        """Update properties of a placed symbol in a schematic (footprint, value, reference).
-        Uses text-based in-place editing – preserves position, UUID and all other fields.
-        """
+        """Update properties of a placed symbol."""
         logger.info("Editing schematic component")
-        try:
-            from pathlib import Path
-            import re
+        path = params.get("schematicPath")
+        ref  = params.get("reference")
+        if not path:
+            return {"success": False, "message": "'schematicPath' is required"}
+        if not ref:
+            return {"success": False, "message": "'reference' is required"}
 
-            schematic_path = params.get("schematicPath")
-            reference = params.get("reference")
-            new_footprint = params.get("footprint")
-            new_value = params.get("value")
-            new_reference = params.get("newReference")
-            custom_properties = params.get("properties") or {}
+        # Build changes dict from all recognised fields
+        changes: dict = {}
+        for key in ("value", "footprint", "datasheet", "x", "y", "rotation", "mirror"):
+            if params.get(key) is not None:
+                changes[key] = params[key]
+        # DNP flag
+        if params.get("dnp") is not None:
+            changes["dnp"] = bool(params["dnp"])
+        # Legacy: newReference → reference rename
+        if params.get("newReference"):
+            changes["reference"] = params["newReference"]
+        # Custom properties
+        if params.get("properties"):
+            changes.update(params["properties"])
 
-            if not schematic_path:
-                return {"success": False, "message": "schematicPath is required"}
-            if not reference:
-                return {"success": False, "message": "reference is required"}
-            if not any(
-                [
-                    new_footprint is not None,
-                    new_value is not None,
-                    new_reference is not None,
-                    custom_properties,
-                ]
-            ):
-                return {
-                    "success": False,
-                    "message": "At least one of footprint, value, newReference, or properties must be provided",
-                }
+        hide_props = params.get("hideProperties") or []
+        show_props = params.get("showProperties") or []
 
-            sch_file = Path(schematic_path)
-            if not sch_file.exists():
-                return {
-                    "success": False,
-                    "message": f"Schematic not found: {schematic_path}",
-                }
-
-            with open(sch_file, "r", encoding="utf-8") as f:
-                content = f.read()
-
-            def find_matching_paren(s, start):
-                """Find the position of the closing paren matching the opening paren at start."""
-                depth = 0
-                i = start
-                while i < len(s):
-                    if s[i] == "(":
-                        depth += 1
-                    elif s[i] == ")":
-                        depth -= 1
-                        if depth == 0:
-                            return i
-                    i += 1
-                return -1
-
-            # Skip lib_symbols section
-            lib_sym_pos = content.find("(lib_symbols")
-            lib_sym_end = (
-                find_matching_paren(content, lib_sym_pos) if lib_sym_pos >= 0 else -1
-            )
-
-            # Find placed symbol blocks that match the reference
-            # Search for (symbol (lib_id "...") ... (property "Reference" "<ref>" ...) ...)
-            block_start = block_end = None
-            search_start = 0
-            pattern = re.compile(r'\(symbol\s+\(lib_id\s+"')
-            while True:
-                m = pattern.search(content, search_start)
-                if not m:
-                    break
-                pos = m.start()
-                # Skip if inside lib_symbols section
-                if lib_sym_pos >= 0 and lib_sym_pos <= pos <= lib_sym_end:
-                    search_start = lib_sym_end + 1
-                    continue
-                end = find_matching_paren(content, pos)
-                if end < 0:
-                    search_start = pos + 1
-                    continue
-                block_text = content[pos : end + 1]
-                if re.search(
-                    r'\(property\s+"Reference"\s+"' + re.escape(reference) + r'"',
-                    block_text,
-                ):
-                    block_start, block_end = pos, end
-                    break
-                search_start = end + 1
-
-            if block_start is None:
-                return {
-                    "success": False,
-                    "message": f"Component '{reference}' not found in schematic",
-                }
-
-            # Apply property replacements within the found block
-            block_text = content[block_start : block_end + 1]
-            if new_footprint is not None:
-                block_text = re.sub(
-                    r'(\(property\s+"Footprint"\s+)"[^"]*"',
-                    rf'\1"{new_footprint}"',
-                    block_text,
-                )
-            if new_value is not None:
-                block_text = re.sub(
-                    r'(\(property\s+"Value"\s+)"[^"]*"', rf'\1"{new_value}"', block_text
-                )
-            if new_reference is not None:
-                block_text = re.sub(
-                    r'(\(property\s+"Reference"\s+)"[^"]*"',
-                    rf'\1"{new_reference}"',
-                    block_text,
-                )
-
-            # Handle arbitrary custom properties
-            for prop_name, prop_value in custom_properties.items():
-                escaped_name = re.escape(prop_name)
-                pattern = r'(\(property\s+"' + escaped_name + r'"\s+)"[^"]*"'
-                if re.search(pattern, block_text):
-                    # Field exists → update value in-place
-                    block_text = re.sub(pattern, rf'\1"{prop_value}"', block_text)
-                else:
-                    # Field missing → append before the closing paren of the symbol block
-                    new_field = (
-                        f'\n    (property "{prop_name}" "{prop_value}"\n'
-                        f'      (at 0 0 0)\n'
-                        f'      (effects\n'
-                        f'        (font\n'
-                        f'          (size 1.27 1.27)\n'
-                        f'        )\n'
-                        f'        (hide yes)\n'
-                        f'      )\n'
-                        f'    )'
-                    )
-                    block_text = block_text[:-1] + new_field + block_text[-1]
-
-            content = content[:block_start] + block_text + content[block_end + 1 :]
-
-            with open(sch_file, "w", encoding="utf-8") as f:
-                f.write(content)
-
-            changes = {
-                k: v
-                for k, v in {
-                    "footprint": new_footprint,
-                    "value": new_value,
-                    "reference": new_reference,
-                }.items()
-                if v is not None
-            }
-            changes.update(custom_properties)
-            logger.info(f"Edited schematic component {reference}: {changes}")
-            return {"success": True, "reference": reference, "updated": changes}
-
-        except Exception as e:
-            logger.error(f"Error editing schematic component: {e}")
-            import traceback
-
-            logger.error(traceback.format_exc())
-            return {"success": False, "message": str(e)}
-
-    def _handle_add_schematic_wire(self, params):
-        """Add a wire to a schematic using WireManager"""
-        logger.info("Adding wire to schematic")
-        try:
-            from pathlib import Path
-            from commands.wire_manager import WireManager
-
-            schematic_path = params.get("schematicPath")
-            start_point = params.get("startPoint")
-            end_point = params.get("endPoint")
-            properties = params.get("properties", {})
-
-            if not schematic_path:
-                return {"success": False, "message": "Schematic path is required"}
-            if not start_point or not end_point:
-                return {
-                    "success": False,
-                    "message": "Start and end points are required",
-                }
-
-            # Extract wire properties
-            stroke_width = properties.get("stroke_width", 0)
-            stroke_type = properties.get("stroke_type", "default")
-
-            # Use WireManager for S-expression manipulation
-            success = WireManager.add_wire(
-                Path(schematic_path),
-                start_point,
-                end_point,
-                stroke_width=stroke_width,
-                stroke_type=stroke_type,
-            )
-
-            if success:
-                return {"success": True, "message": "Wire added successfully"}
-            else:
-                return {"success": False, "message": "Failed to add wire"}
-        except Exception as e:
-            logger.error(f"Error adding wire to schematic: {str(e)}")
-            import traceback
-
-            logger.error(traceback.format_exc())
+        if not changes and not hide_props and not show_props:
             return {
                 "success": False,
-                "message": str(e),
-                "errorDetails": traceback.format_exc(),
+                "message": "No changes specified — provide at least one of: value, footprint, datasheet, x, y, rotation, mirror, dnp, newReference, properties, hideProperties, showProperties",
             }
+        return SchematicEditor.edit_component(path, ref, changes,
+                                              hide_properties=hide_props,
+                                              show_properties=show_props)
+
+    def _handle_replace_schematic_symbol(self, params):
+        """Swap the underlying symbol (lib_id) of a placed component."""
+        logger.info("Replacing schematic symbol")
+        path      = params.get("schematicPath")
+        reference = params.get("reference")
+        new_lib   = params.get("newLibrary")
+        new_sym   = params.get("newSymbol")
+        if not path:
+            return {"success": False, "message": "'schematicPath' is required"}
+        if not reference:
+            return {"success": False, "message": "'reference' is required"}
+        if not new_lib:
+            return {"success": False, "message": "'newLibrary' is required"}
+        if not new_sym:
+            return {"success": False, "message": "'newSymbol' is required"}
+
+        extra: dict = {}
+        for key in ("value", "footprint", "datasheet", "x", "y", "rotation", "mirror"):
+            if params.get(key) is not None:
+                extra[key] = params[key]
+        if params.get("properties"):
+            extra.update(params["properties"])
+
+        return SchematicEditor.replace_symbol(
+            path          = path,
+            reference     = reference,
+            new_library   = new_lib,
+            new_symbol    = new_sym,
+            lib_file      = params.get("libFile"),
+            extra_changes = extra or None,
+            hide_reference = bool(params.get("hideReference", False)),
+            hide_value     = bool(params.get("hideValue", False)),
+        )
+
+    def _handle_add_schematic_wire(self, params):
+        """Add wire segment(s) to a schematic."""
+        logger.info("Adding wire to schematic")
+        path   = params.get("schematicPath")
+        points = params.get("points")
+        if not path:
+            return {"success": False, "message": "'schematicPath' is required"}
+        if not points:
+            # Legacy: accept startPoint / endPoint
+            sp = params.get("startPoint")
+            ep = params.get("endPoint")
+            if sp and ep:
+                points = [sp, ep]
+            else:
+                return {"success": False, "message": "'points' is required (list of [x,y])"}
+        return SchematicEditor.add_wire(path, points)
 
     def _handle_list_schematic_libraries(self, params):
-        """List available symbol libraries"""
+        """List available symbol libraries."""
         logger.info("Listing schematic libraries")
         try:
-            search_paths = params.get("searchPaths")
-
-            libraries = LibraryManager.list_available_libraries(search_paths)
-            return {"success": True, "libraries": libraries}
+            from commands.schematic_kiutils import _SYMBOL_LIB_SEARCH_PATHS
+            import glob as _glob
+            extra = params.get("searchPaths") or []
+            search = list(extra) + _SYMBOL_LIB_SEARCH_PATHS
+            names, paths = [], []
+            for base in search:
+                for f in _glob.glob(f"{base}/*.kicad_sym"):
+                    import os as _os
+                    n = _os.path.splitext(_os.path.basename(f))[0]
+                    if n not in names:
+                        names.append(n)
+                        paths.append(f)
+            return {"success": True, "libraries": {"names": names, "paths": paths}}
         except Exception as e:
             logger.error(f"Error listing schematic libraries: {str(e)}")
             return {"success": False, "message": str(e)}
@@ -1142,13 +909,28 @@ class KiCADInterface:
             return {"success": False, "error": str(e)}
 
     def _handle_list_symbols_in_library(self, params):
-        """List all symbols in a .kicad_sym file."""
-        logger.info(f"list_symbols_in_library: {params.get('libraryPath')}")
+        """List all symbols in a .kicad_sym file (by path or by library name)."""
+        lib_path = params.get("libraryPath", "")
+        lib_name = params.get("library", "")
+        logger.info(f"list_symbols_in_library: path={lib_path!r} name={lib_name!r}")
+
+        # If a library name was given instead of a path, resolve it
+        if not lib_path and lib_name:
+            from commands.schematic_kiutils import _find_symbol_lib_file
+            found = _find_symbol_lib_file(lib_name)
+            if found is None:
+                return {
+                    "success": False,
+                    "error": f"Library '{lib_name}' not found. Use list_schematic_libraries to see available libraries."
+                }
+            lib_path = str(found)
+
+        if not lib_path:
+            return {"success": False, "error": "Provide 'library' (name) or 'libraryPath' (file path)"}
+
         try:
             creator = SymbolCreator()
-            return creator.list_symbols(
-                library_path=params.get("libraryPath", ""),
-            )
+            return creator.list_symbols(library_path=lib_path)
         except Exception as e:
             logger.error(f"list_symbols_in_library error: {e}")
             return {"success": False, "error": str(e)}
@@ -1205,209 +987,55 @@ class KiCADInterface:
             logger.error(f"Error exporting schematic to PDF: {str(e)}")
             return {"success": False, "message": str(e)}
 
-    def _handle_add_schematic_connection(self, params):
-        """Add a pin-to-pin connection in schematic with automatic pin discovery and routing"""
-        logger.info("Adding pin-to-pin connection in schematic")
-        try:
-            from pathlib import Path
+    def _handle_add_schematic_junction(self, params):
+        """Add a junction dot where wires should connect."""
+        logger.info("Adding junction to schematic")
+        path = params.get("schematicPath")
+        x    = params.get("x")
+        y    = params.get("y")
+        if not path:
+            return {"success": False, "message": "'schematicPath' is required"}
+        if x is None or y is None:
+            return {"success": False, "message": "'x' and 'y' are required"}
+        return SchematicEditor.add_junction(path, float(x), float(y))
 
-            schematic_path = params.get("schematicPath")
-            source_ref = params.get("sourceRef")
-            source_pin = params.get("sourcePin")
-            target_ref = params.get("targetRef")
-            target_pin = params.get("targetPin")
-            routing = params.get(
-                "routing", "direct"
-            )  # 'direct', 'orthogonal_h', 'orthogonal_v'
-
-            if not all(
-                [schematic_path, source_ref, source_pin, target_ref, target_pin]
-            ):
-                return {"success": False, "message": "Missing required parameters"}
-
-            # Use ConnectionManager with new PinLocator and WireManager integration
-            success = ConnectionManager.add_connection(
-                Path(schematic_path),
-                source_ref,
-                source_pin,
-                target_ref,
-                target_pin,
-                routing=routing,
-            )
-
-            if success:
-                return {
-                    "success": True,
-                    "message": f"Connected {source_ref}/{source_pin} to {target_ref}/{target_pin} (routing: {routing})",
-                }
-            else:
-                return {"success": False, "message": "Failed to add connection"}
-        except Exception as e:
-            logger.error(f"Error adding schematic connection: {str(e)}")
-            import traceback
-
-            logger.error(traceback.format_exc())
-            return {
-                "success": False,
-                "message": str(e),
-                "errorDetails": traceback.format_exc(),
-            }
+    def _handle_add_schematic_no_connect(self, params):
+        """Add a no-connect flag to an unconnected pin."""
+        logger.info("Adding no-connect to schematic")
+        path = params.get("schematicPath")
+        x    = params.get("x")
+        y    = params.get("y")
+        if not path:
+            return {"success": False, "message": "'schematicPath' is required"}
+        if x is None or y is None:
+            return {"success": False, "message": "'x' and 'y' are required"}
+        return SchematicEditor.add_no_connect(path, float(x), float(y))
 
     def _handle_add_schematic_net_label(self, params):
-        """Add a net label to schematic using WireManager"""
+        """Add a net label (local or global) to a schematic."""
         logger.info("Adding net label to schematic")
-        try:
-            from pathlib import Path
-            from commands.wire_manager import WireManager
-
-            schematic_path = params.get("schematicPath")
-            net_name = params.get("netName")
-            position = params.get("position")
-            label_type = params.get(
-                "labelType", "label"
-            )  # 'label', 'global_label', 'hierarchical_label'
-            orientation = params.get("orientation", 0)  # 0, 90, 180, 270
-
-            if not all([schematic_path, net_name, position]):
-                return {"success": False, "message": "Missing required parameters"}
-
-            # Use WireManager for S-expression manipulation
-            success = WireManager.add_label(
-                Path(schematic_path),
-                net_name,
-                position,
-                label_type=label_type,
-                orientation=orientation,
-            )
-
-            if success:
-                return {
-                    "success": True,
-                    "message": f"Added net label '{net_name}' at {position}",
-                }
-            else:
-                return {"success": False, "message": "Failed to add net label"}
-        except Exception as e:
-            logger.error(f"Error adding net label: {str(e)}")
-            import traceback
-
-            logger.error(traceback.format_exc())
-            return {
-                "success": False,
-                "message": str(e),
-                "errorDetails": traceback.format_exc(),
-            }
-
-    def _handle_connect_to_net(self, params):
-        """Connect a component pin to a named net using wire stub and label"""
-        logger.info("Connecting component pin to net")
-        try:
-            from pathlib import Path
-
-            schematic_path = params.get("schematicPath")
-            component_ref = params.get("componentRef")
-            pin_name = params.get("pinName")
-            net_name = params.get("netName")
-
-            if not all([schematic_path, component_ref, pin_name, net_name]):
-                return {"success": False, "message": "Missing required parameters"}
-
-            # Use ConnectionManager with new WireManager integration
-            success = ConnectionManager.connect_to_net(
-                Path(schematic_path), component_ref, pin_name, net_name
-            )
-
-            if success:
-                return {
-                    "success": True,
-                    "message": f"Connected {component_ref}/{pin_name} to net '{net_name}'",
-                }
-            else:
-                return {"success": False, "message": "Failed to connect to net"}
-        except Exception as e:
-            logger.error(f"Error connecting to net: {str(e)}")
-            import traceback
-
-            logger.error(traceback.format_exc())
-            return {
-                "success": False,
-                "message": str(e),
-                "errorDetails": traceback.format_exc(),
-            }
-
-    def _handle_connect_passthrough(self, params):
-        """Connect all pins of source connector to matching pins of target connector"""
-        logger.info("Connecting passthrough between two connectors")
-        try:
-            from pathlib import Path
-
-            schematic_path = params.get("schematicPath")
-            source_ref = params.get("sourceRef")
-            target_ref = params.get("targetRef")
-            net_prefix = params.get("netPrefix", "PIN")
-            pin_offset = int(params.get("pinOffset", 0))
-
-            if not all([schematic_path, source_ref, target_ref]):
-                return {"success": False, "message": "Missing required parameters: schematicPath, sourceRef, targetRef"}
-
-            result = ConnectionManager.connect_passthrough(
-                Path(schematic_path), source_ref, target_ref, net_prefix, pin_offset
-            )
-
-            n_ok = len(result["connected"])
-            n_fail = len(result["failed"])
-            return {
-                "success": n_fail == 0,
-                "message": f"Passthrough complete: {n_ok} connected, {n_fail} failed",
-                "connected": result["connected"],
-                "failed": result["failed"],
-            }
-        except Exception as e:
-            logger.error(f"Error in connect_passthrough: {str(e)}")
-            import traceback
-            logger.error(traceback.format_exc())
-            return {"success": False, "message": str(e)}
+        path     = params.get("schematicPath")
+        net_name = params.get("netName")
+        x        = params.get("x")
+        y        = params.get("y")
+        if not path:
+            return {"success": False, "message": "'schematicPath' is required"}
+        if not net_name:
+            return {"success": False, "message": "'netName' is required"}
+        if x is None or y is None:
+            return {"success": False, "message": "'x' and 'y' are required"}
+        angle        = float(params.get("rotation", params.get("angle", 0)))
+        global_label = bool(params.get("global", params.get("labelType") == "global_label"))
+        return SchematicEditor.add_net_label(path, net_name, float(x), float(y), angle, global_label)
 
     def _handle_get_schematic_pin_locations(self, params):
-        """Return exact pin endpoint coordinates for a schematic component"""
+        """Return absolute pin coordinates for a placed component."""
         logger.info("Getting schematic pin locations")
-        try:
-            from pathlib import Path
-            from commands.pin_locator import PinLocator
-
-            schematic_path = params.get("schematicPath")
-            reference = params.get("reference")
-
-            if not all([schematic_path, reference]):
-                return {"success": False, "message": "Missing required parameters: schematicPath, reference"}
-
-            locator = PinLocator()
-            all_pins = locator.get_all_symbol_pins(Path(schematic_path), reference)
-
-            if not all_pins:
-                return {"success": False, "message": f"No pins found for {reference} — check reference and schematic path"}
-
-            # Enrich with pin names and angles from the symbol definition
-            pins_def = locator.get_symbol_pins(
-                Path(schematic_path),
-                locator._get_lib_id(Path(schematic_path), reference),
-            ) if hasattr(locator, "_get_lib_id") else {}
-
-            result = {}
-            for pin_num, coords in all_pins.items():
-                entry = {"x": coords[0], "y": coords[1]}
-                if pin_num in pins_def:
-                    entry["name"] = pins_def[pin_num].get("name", pin_num)
-                    entry["angle"] = locator.get_pin_angle(Path(schematic_path), reference, pin_num) or 0
-                result[pin_num] = entry
-
-            return {"success": True, "reference": reference, "pins": result}
-
-        except Exception as e:
-            logger.error(f"Error getting pin locations: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            return {"success": False, "message": str(e)}
+        path = params.get("schematicPath")
+        ref  = params.get("reference")
+        if not path or not ref:
+            return {"success": False, "message": "'schematicPath' and 'reference' are required"}
+        return SchematicEditor.get_pin_locations(path, ref)
 
     def _handle_get_net_connections(self, params):
         """Get all connections for a named net"""
@@ -1428,6 +1056,32 @@ class KiCADInterface:
         except Exception as e:
             logger.error(f"Error getting net connections: {str(e)}")
             return {"success": False, "message": str(e)}
+
+    def _handle_annotate_schematic(self, params):
+        """Re-annotate schematic components with sequential reference designators."""
+        logger.info("Annotating schematic components")
+        path = params.get("schematicPath")
+        if not path:
+            return {"success": False, "message": "'schematicPath' is required"}
+        return SchematicEditor.annotate_components(
+            path                      = path,
+            sort_by_position          = bool(params.get("sortByPosition", True)),
+            skip_prefixes             = params.get("skipPrefixes") or [],
+            start_number              = int(params.get("startNumber", 1)),
+            only_unannotated          = bool(params.get("onlyUnannotated", False)),
+            existing_schematic_paths  = params.get("existingSchematicPaths") or [],
+        )
+
+    def _handle_clear_annotation(self, params):
+        """Reset reference designators back to the 'X?' form."""
+        logger.info("Clearing schematic annotation")
+        path = params.get("schematicPath")
+        if not path:
+            return {"success": False, "message": "'schematicPath' is required"}
+        return SchematicEditor.clear_annotation(
+            path     = path,
+            prefixes = params.get("prefixes") or None,
+        )
 
     def _handle_run_erc(self, params):
         """Run Electrical Rules Check on a schematic via kicad-cli"""
@@ -1476,18 +1130,33 @@ class KiCADInterface:
                 violations = []
                 severity_counts = {"error": 0, "warning": 0, "info": 0}
 
-                for v in erc_data.get("violations", []):
+                # KiCAD 9+ nests violations under "sheets[].violations";
+                # older versions (8.x) put them at the root under "violations".
+                raw_violations = []
+                if "sheets" in erc_data:
+                    for sheet in erc_data["sheets"]:
+                        sheet_path = sheet.get("path", "/")
+                        for v in sheet.get("violations", []):
+                            v["_sheet"] = sheet_path
+                            raw_violations.append(v)
+                else:
+                    raw_violations = erc_data.get("violations", [])
+
+                for v in raw_violations:
                     vseverity = v.get("severity", "error")
                     items = v.get("items", [])
                     loc = {}
                     if items and "pos" in items[0]:
                         loc = {"x": items[0]["pos"].get("x", 0), "y": items[0]["pos"].get("y", 0)}
-                    violations.append({
+                    entry = {
                         "type": v.get("type", "unknown"),
                         "severity": vseverity,
                         "message": v.get("description", ""),
                         "location": loc,
-                    })
+                    }
+                    if "_sheet" in v:
+                        entry["sheet"] = v["_sheet"]
+                    violations.append(entry)
                     if vseverity in severity_counts:
                         severity_counts[vseverity] += 1
 

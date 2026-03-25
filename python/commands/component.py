@@ -460,6 +460,7 @@ class ComponentCommands:
             new_reference = params.get("newReference")
             value = params.get("value")
             footprint = params.get("footprint")
+            dnp = params.get("dnp")
 
             if not reference:
                 return {
@@ -482,6 +483,12 @@ class ComponentCommands:
                 module.SetReference(new_reference)
             if value:
                 module.SetValue(value)
+            if dnp is not None:
+                attrs = module.GetAttributes()
+                if bool(dnp):
+                    module.SetAttributes(attrs | pcbnew.FP_DNP)
+                else:
+                    module.SetAttributes(attrs & ~pcbnew.FP_DNP)
             if footprint:
                 # For KiCAD 9.x compatibility, use SetFPID instead of SetFootprintName
                 # Parse footprint string (format: "Library:Footprint")
@@ -502,7 +509,8 @@ class ComponentCommands:
                 "component": {
                     "reference": new_reference or reference,
                     "value": value or module.GetValue(),
-                    "footprint": footprint or module.GetFPIDAsString()
+                    "footprint": footprint or module.GetFPIDAsString(),
+                    "dnp": bool(module.GetAttributes() & pcbnew.FP_DNP),
                 }
             }
 
@@ -560,9 +568,10 @@ class ComponentCommands:
                     "rotation": module.GetOrientation().AsDegrees(),
                     "layer": self.board.GetLayerName(module.GetLayer()),
                     "attributes": {
-                        "smd": module.GetAttributes() & pcbnew.FP_SMD,
-                        "through_hole": module.GetAttributes() & pcbnew.FP_THROUGH_HOLE,
-                        "board_only": module.GetAttributes() & pcbnew.FP_BOARD_ONLY
+                        "smd": bool(module.GetAttributes() & pcbnew.FP_SMD),
+                        "through_hole": bool(module.GetAttributes() & pcbnew.FP_THROUGH_HOLE),
+                        "board_only": bool(module.GetAttributes() & pcbnew.FP_BOARD_ONLY),
+                        "dnp": bool(module.GetAttributes() & pcbnew.FP_DNP),
                     }
                 }
             }

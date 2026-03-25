@@ -5,6 +5,7 @@ description = "MCP server for KiCAD PCB design automation"
 requires-python = ">=3.11"
 dependencies = [
     "kicad-skip>=0.1.0",
+    "kiutils>=1.4.0",
     "Pillow>=9.0.0",
     "cairosvg>=2.7.0",
     "colorlog>=6.7.0",

@@ -608,6 +608,7 @@ dependencies = [
     { name = "cairosvg" },
     { name = "colorlog" },
     { name = "kicad-skip" },
+    { name = "kiutils" },
     { name = "pillow" },
     { name = "pydantic" },
     { name = "python-dotenv" },
@@ -644,6 +645,7 @@ requires-dist = [
     { name = "ipython", marker = "extra == 'dev'", specifier = ">=8.14.0" },
     { name = "isort", marker = "extra == 'dev'", specifier = ">=5.12.0" },
     { name = "kicad-skip", specifier = ">=0.1.0" },
+    { name = "kiutils", specifier = ">=1.4.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.5.0" },
     { name = "pillow", specifier = ">=9.0.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.3.0" },
@@ -671,6 +673,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/71/21/141a62d1ce5be29cd3cc9d61b8035457e495d071cd2ce57648812e0f0d0a/kicad-skip-0.2.5.tar.gz", hash = "sha256:dc6b47215da1e82f2cc8567f0f1e8e5ac8297f5e1941d967192e043380e08c83", size = 60567, upload-time = "2024-02-16T00:16:12.305Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/83/be/d6d94eb42f93f59d2ccdf07feffe7b34eb6c00ad5cf3a85f2af1f9c8c5e6/kicad_skip-0.2.5-py3-none-any.whl", hash = "sha256:276ba578d42859d3e3db5d39881853b8d3dcf28ec11f37ae363f8b23a0a83888", size = 62786, upload-time = "2024-02-16T00:16:09.66Z" },
+]
+
+[[package]]
+name = "kiutils"
+version = "1.4.8"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/db/07/04d7a636eaf9f54f6e7cdfc2117843ef4cc6a6360a9866fbd76bc2a0d0dd/kiutils-1.4.8.tar.gz", hash = "sha256:18c5803283e579cfe8772955e7702548d7139e0fc630daa579ed6b2b767db846", size = 84024, upload-time = "2024-02-02T23:38:00.283Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8c/c0/381ece43b464ce8aff02a327b0d5cdc011b8c0d9a652e245b05e0bb0810a/kiutils-1.4.8-py3-none-any.whl", hash = "sha256:ca7c5c7eafb7bc33daa3d6cfe42cc704be2bcd2206103b28ad2682d88a6072ae", size = 93827, upload-time = "2024-02-02T23:37:58.443Z" },
 ]
 
 [[package]]

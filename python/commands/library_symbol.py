@@ -140,14 +140,20 @@ class SymbolLibraryManager:
         """
         resolved = uri
 
-        # Common KiCAD environment variables
+        # Common KiCAD environment variables (all supported major versions)
+        _sym_dir = self._find_kicad_symbol_dir()
+        _3rd_party = self._find_3rd_party_dir()
         env_vars = {
-            'KICAD9_SYMBOL_DIR': self._find_kicad_symbol_dir(),
-            'KICAD8_SYMBOL_DIR': self._find_kicad_symbol_dir(),
-            'KICAD_SYMBOL_DIR': self._find_kicad_symbol_dir(),
-            'KICAD9_3RD_PARTY': self._find_3rd_party_dir(),
-            'KICAD8_3RD_PARTY': self._find_3rd_party_dir(),
-            'KISYSSYM': self._find_kicad_symbol_dir(),
+            'KICAD9_SYMBOL_DIR': _sym_dir,
+            'KICAD8_SYMBOL_DIR': _sym_dir,
+            'KICAD7_SYMBOL_DIR': _sym_dir,
+            'KICAD6_SYMBOL_DIR': _sym_dir,
+            'KICAD_SYMBOL_DIR':  _sym_dir,
+            'KISYSSYM':          _sym_dir,
+            'KICAD9_3RD_PARTY':  _3rd_party,
+            'KICAD8_3RD_PARTY':  _3rd_party,
+            'KICAD7_3RD_PARTY':  _3rd_party,
+            'KICAD6_3RD_PARTY':  _3rd_party,
         }
 
         # Project directory
@@ -285,7 +291,12 @@ class SymbolLibraryManager:
         return symbols
 
     def _extract_properties(self, symbol_block: str) -> Dict[str, str]:
-        """Extract properties from a symbol block"""
+        """Extract properties from a symbol block.
+
+        Uses setdefault so the *first* occurrence of each key wins — the
+        symbol's own properties — preventing bleed-over from the next symbol
+        when the fixed-size extraction window extends past the closing paren.
+        """
         properties = {}
 
         # Pattern for properties: (property "KEY" "VALUE" ...)
@@ -294,7 +305,7 @@ class SymbolLibraryManager:
         for match in re.finditer(prop_pattern, symbol_block):
             key = match.group(1)
             value = match.group(2)
-            properties[key] = value
+            properties.setdefault(key, value)  # first occurrence wins
 
         return properties
 

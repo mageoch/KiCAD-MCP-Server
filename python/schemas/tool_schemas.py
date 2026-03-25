@@ -491,7 +491,7 @@ COMPONENT_TOOLS = [
     {
         "name": "edit_component",
         "title": "Edit Component Properties",
-        "description": "Modifies properties of an existing component (value, footprint, etc.).",
+        "description": "Modifies properties of an existing PCB component (value, footprint, DNP flag, etc.).",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -506,6 +506,10 @@ COMPONENT_TOOLS = [
                 "footprint": {
                     "type": "string",
                     "description": "New footprint library:name"
+                },
+                "dnp": {
+                    "type": "boolean",
+                    "description": "Mark component as Do Not Place (true) or clear the DNP flag (false)"
                 }
             },
             "required": ["reference"]
@@ -969,9 +973,9 @@ ROUTING_TOOLS = [
                     "description": "Net class name",
                     "minLength": 1
                 },
-                "traceWidth": {
+                "trackWidth": {
                     "type": "number",
-                    "description": "Default trace width in millimeters",
+                    "description": "Default track/trace width in millimeters",
                     "minimum": 0.1
                 },
                 "clearance": {
@@ -988,7 +992,28 @@ ROUTING_TOOLS = [
                     "description": "Via drill diameter in millimeters"
                 }
             },
-            "required": ["name", "traceWidth", "clearance"]
+            "required": ["name", "trackWidth", "clearance"]
+        }
+    },
+    {
+        "name": "assign_net_to_class",
+        "title": "Assign Net to Net Class",
+        "description": "Assigns one or more existing nets to a net class. The net class must already exist (use create_netclass first).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "nets": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of net names to assign (e.g. [\"+3V3\", \"GND\", \"/PWR/VBUS\"])",
+                    "minItems": 1
+                },
+                "netClass": {
+                    "type": "string",
+                    "description": "Name of the target net class (must exist)"
+                }
+            },
+            "required": ["nets", "netClass"]
         }
     },
     {
@@ -1126,6 +1151,100 @@ LIBRARY_TOOLS = [
             "required": ["library"]
         }
     },
+    # ------------------------------------------------------------------
+    # Symbol library tools (schematic components)
+    # ------------------------------------------------------------------
+    {
+        "name": "list_symbol_libraries",
+        "title": "List Symbol Libraries",
+        "description": "Lists all KiCAD symbol libraries registered in the global sym-lib-table (and optionally a project sym-lib-table).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "projectPath": {
+                    "type": "string",
+                    "description": "Optional project directory path to also load its sym-lib-table"
+                }
+            }
+        }
+    },
+    {
+        "name": "search_symbols",
+        "title": "Search Symbols",
+        "description": "Searches for KiCAD schematic symbols by name, description, LCSC ID, manufacturer, or MPN across all registered libraries.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query (e.g. 'ESP32', 'C25768', 'resistor', 'MOSFET')",
+                    "minLength": 1
+                },
+                "library": {
+                    "type": "string",
+                    "description": "Optional library name to restrict the search (e.g. 'Device')"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of results to return (default: 20)",
+                    "default": 20,
+                    "minimum": 1,
+                    "maximum": 200
+                }
+            },
+            "required": ["query"]
+        }
+    },
+    {
+        "name": "list_library_symbols",
+        "title": "List Symbols in Library (by nickname)",
+        "description": "Lists all symbols available in a specific KiCAD symbol library, looked up by its sym-lib-table nickname.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "library": {
+                    "type": "string",
+                    "description": "Library nickname as registered in sym-lib-table (e.g. 'Device', 'Connector_Generic')",
+                    "minLength": 1
+                }
+            },
+            "required": ["library"]
+        }
+    },
+    {
+        "name": "list_symbols_in_library",
+        "title": "List Symbols in Library (by name or path)",
+        "description": "Lists all symbols in a .kicad_sym library file. Accepts either a library name (auto-resolved from KiCAD symbol directories) or a full file path.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "library": {
+                    "type": "string",
+                    "description": "Library name to auto-resolve (e.g. 'Device', 'Transistor_FET'). Use this instead of libraryPath when possible."
+                },
+                "libraryPath": {
+                    "type": "string",
+                    "description": "Full path to the .kicad_sym file. Use library name instead when possible."
+                }
+            }
+        }
+    },
+    {
+        "name": "get_symbol_info",
+        "title": "Get Symbol Details",
+        "description": "Retrieves detailed metadata for a specific symbol: description, footprint, datasheet, LCSC ID, MPN, and more.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "symbol": {
+                    "type": "string",
+                    "description": "Symbol specification as 'Library:SymbolName' (e.g. 'Device:R') or just 'SymbolName' to search all libraries",
+                    "minLength": 1
+                }
+            },
+            "required": ["symbol"]
+        }
+    },
     {
         "name": "get_footprint_info",
         "title": "Get Footprint Details",
@@ -1177,7 +1296,7 @@ DESIGN_RULE_TOOLS = [
                     "type": "number",
                     "description": "Minimum via drill diameter in millimeters"
                 },
-                "microViaD iameter": {
+                "microViaDiameter": {
                     "type": "number",
                     "description": "Minimum micro-via diameter in millimeters"
                 }
@@ -1354,20 +1473,33 @@ EXPORT_TOOLS = [
 # =============================================================================
 
 SCHEMATIC_TOOLS = [
+    # ------------------------------------------------------------------
+    # File management
+    # ------------------------------------------------------------------
     {
         "name": "create_schematic",
         "title": "Create New Schematic",
-        "description": "Creates a new KiCAD schematic file for circuit design.",
+        "description": (
+            "Creates a new empty KiCAD schematic file (.kicad_sch). "
+            "If the file already exists the response includes a 'warning' field "
+            "with the number of components that were erased. "
+            "Pass overwrite=false to abort instead of silently overwriting."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "filename": {
                     "type": "string",
-                    "description": "Path for the new schematic file (.kicad_sch)"
+                    "description": "Full path for the new schematic file, e.g. /path/to/project/my_board.kicad_sch"
                 },
                 "title": {
                     "type": "string",
-                    "description": "Schematic title"
+                    "description": "Optional schematic title shown in the title block"
+                },
+                "overwrite": {
+                    "type": "boolean",
+                    "description": "Allow overwriting an existing file (default: true). Set to false to abort if the file exists.",
+                    "default": True
                 }
             },
             "required": ["filename"]
@@ -1375,60 +1507,308 @@ SCHEMATIC_TOOLS = [
     },
     {
         "name": "load_schematic",
-        "title": "Load Existing Schematic",
-        "description": "Opens an existing KiCAD schematic file for editing.",
+        "title": "Load Schematic",
+        "description": "Opens an existing KiCAD schematic file and returns a summary: component list, wire count, label count.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "filename": {
                     "type": "string",
-                    "description": "Path to schematic file (.kicad_sch)"
+                    "description": "Path to the .kicad_sch file"
                 }
             },
             "required": ["filename"]
         }
     },
+    # ------------------------------------------------------------------
+    # Component CRUD
+    # ------------------------------------------------------------------
     {
-        "name": "add_schematic_component",
-        "title": "Add Component to Schematic",
-        "description": "Places a symbol (resistor, capacitor, IC, etc.) on the schematic.",
+        "name": "list_schematic_components",
+        "title": "List Schematic Components",
+        "description": "Returns all placed symbols in a schematic with their reference, value, footprint, position, and lib_id.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "reference": {
+                "schematicPath": {
                     "type": "string",
-                    "description": "Reference designator (e.g., R1, C2, U3)"
-                },
-                "symbol": {
-                    "type": "string",
-                    "description": "Symbol library:name (e.g., Device:R, Device:C)"
-                },
-                "value": {
-                    "type": "string",
-                    "description": "Component value (e.g., 10k, 0.1uF)"
-                },
-                "x": {
-                    "type": "number",
-                    "description": "X coordinate on schematic"
-                },
-                "y": {
-                    "type": "number",
-                    "description": "Y coordinate on schematic"
+                    "description": "Path to the .kicad_sch file"
                 }
             },
-            "required": ["reference", "symbol", "x", "y"]
+            "required": ["schematicPath"]
         }
     },
     {
-        "name": "add_schematic_wire",
-        "title": "Connect Components",
-        "description": "Draws a wire connection between component pins on the schematic.",
+        "name": "add_schematic_component",
+        "title": "Add Component to Schematic",
+        "description": (
+            "Places a symbol from a KiCAD symbol library onto the schematic. "
+            "The symbol definition is read directly from the installed KiCAD library — "
+            "no template system needed. "
+            "Use get_schematic_pin_locations afterwards to find exact pin coordinates for wiring."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
+                "schematicPath": {
+                    "type": "string",
+                    "description": "Path to the .kicad_sch file"
+                },
+                "library": {
+                    "type": "string",
+                    "description": "KiCAD symbol library name (e.g. 'Device', 'Connector_Generic', 'MCU_ST_STM32F4')"
+                },
+                "symbol": {
+                    "type": "string",
+                    "description": "Symbol name within the library (e.g. 'R', 'C', 'Conn_01x04')"
+                },
+                "reference": {
+                    "type": "string",
+                    "description": "Reference designator (e.g. 'R1', 'C3', 'U1')"
+                },
+                "value": {
+                    "type": "string",
+                    "description": "Component value shown on schematic (e.g. '10k', '100nF', 'STM32F401')"
+                },
+                "x": {
+                    "type": "number",
+                    "description": "X position in millimetres on the schematic sheet"
+                },
+                "y": {
+                    "type": "number",
+                    "description": "Y position in millimetres on the schematic sheet"
+                },
+                "footprint": {
+                    "type": "string",
+                    "description": "KiCAD footprint reference (e.g. 'Resistor_SMD:R_0402'). Can be set later with edit_schematic_component."
+                },
+                "rotation": {
+                    "type": "number",
+                    "description": "Rotation in degrees (0, 90, 180, 270). Default: 0",
+                    "default": 0
+                },
+                "mirror": {
+                    "type": "string",
+                    "enum": ["", "x", "y"],
+                    "description": "Mirror the symbol: 'x' = flip vertically, 'y' = flip horizontally, '' = none",
+                    "default": ""
+                },
+                "datasheet": {
+                    "type": "string",
+                    "description": "Datasheet URL or '~'. Defaults to the value from the library symbol."
+                },
+                "properties": {
+                    "type": "object",
+                    "description": "Additional custom properties (e.g. {\"LCSC Part\": \"C25768\"}). All custom properties are hidden by default.",
+                    "additionalProperties": {"type": "string"}
+                },
+                "hideReference": {
+                    "type": "boolean",
+                    "description": "Hide the Reference designator text on the schematic. Default: false (visible).",
+                    "default": False
+                },
+                "hideValue": {
+                    "type": "boolean",
+                    "description": "Hide the Value text on the schematic. Default: false (visible).",
+                    "default": False
+                },
+                "dnp": {
+                    "type": "boolean",
+                    "description": "Mark component as Do Not Place. Also sets inBom=false. Default: false.",
+                    "default": False
+                }
+            },
+            "required": ["schematicPath", "library", "symbol", "reference", "x", "y"]
+        }
+    },
+    {
+        "name": "edit_schematic_component",
+        "title": "Edit Schematic Component",
+        "description": (
+            "Updates properties of a placed symbol. Supports: value, footprint, datasheet, "
+            "reference (rename), x, y, rotation, mirror, and arbitrary custom properties. "
+            "Only the fields you supply are changed."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "schematicPath": {
+                    "type": "string",
+                    "description": "Path to the .kicad_sch file"
+                },
+                "reference": {
+                    "type": "string",
+                    "description": "Reference designator of the component to edit (e.g. 'R1')"
+                },
+                "value": {
+                    "type": "string",
+                    "description": "New value (e.g. '22k')"
+                },
+                "footprint": {
+                    "type": "string",
+                    "description": "New footprint (e.g. 'Resistor_SMD:R_0603')"
+                },
+                "datasheet": {
+                    "type": "string",
+                    "description": "New datasheet URL"
+                },
+                "newReference": {
+                    "type": "string",
+                    "description": "Rename the component to a new reference designator"
+                },
+                "x": {
+                    "type": "number",
+                    "description": "New X position in mm"
+                },
+                "y": {
+                    "type": "number",
+                    "description": "New Y position in mm"
+                },
+                "rotation": {
+                    "type": "number",
+                    "description": "New rotation in degrees"
+                },
+                "mirror": {
+                    "type": "string",
+                    "enum": ["", "x", "y"],
+                    "description": "Mirror axis"
+                },
+                "properties": {
+                    "type": "object",
+                    "description": "Custom properties to set/update (e.g. {\"LCSC Part\": \"C25768\"})",
+                    "additionalProperties": {"type": "string"}
+                },
+                "hideProperties": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Property keys to hide (e.g. [\"Reference\", \"Value\", \"Footprint\"])"
+                },
+                "showProperties": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Property keys to make visible (e.g. [\"Footprint\", \"Datasheet\"])"
+                },
+                "dnp": {
+                    "type": "boolean",
+                    "description": "Mark component as Do Not Place (true) or clear the DNP flag (false). Also toggles inBom accordingly."
+                }
+            },
+            "required": ["schematicPath", "reference"]
+        }
+    },
+    {
+        "name": "replace_schematic_symbol",
+        "title": "Replace Schematic Symbol",
+        "description": (
+            "Swaps the underlying KiCAD symbol (lib_id) of a placed component while "
+            "preserving its position, rotation, mirror, and all existing properties. "
+            "Use this to replace EasyEDA/imported symbols with standard KiCAD symbols "
+            "(e.g. Device:R, Device:C, Device:SW_Push, Transistor_FET:2N7002). "
+            "Optionally override value, footprint, or other properties at the same time."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "schematicPath": {
+                    "type": "string",
+                    "description": "Path to the .kicad_sch file"
+                },
+                "reference": {
+                    "type": "string",
+                    "description": "Reference designator of the component to replace (e.g. 'R1')"
+                },
+                "newLibrary": {
+                    "type": "string",
+                    "description": "Target KiCAD symbol library name (e.g. 'Device', 'Transistor_FET')"
+                },
+                "newSymbol": {
+                    "type": "string",
+                    "description": "Target symbol name within that library (e.g. 'R', 'C', '2N7002')"
+                },
+                "value": {
+                    "type": "string",
+                    "description": "Override the component value (default: keep existing value)"
+                },
+                "footprint": {
+                    "type": "string",
+                    "description": "Override the footprint (default: keep existing footprint)"
+                },
+                "datasheet": {
+                    "type": "string",
+                    "description": "Override the datasheet URL"
+                },
+                "x": {"type": "number", "description": "Override X position in mm"},
+                "y": {"type": "number", "description": "Override Y position in mm"},
+                "rotation": {"type": "number", "description": "Override rotation in degrees"},
+                "mirror": {
+                    "type": "string",
+                    "enum": ["", "x", "y"],
+                    "description": "Override mirror axis"
+                },
+                "properties": {
+                    "type": "object",
+                    "description": "Additional custom properties to set/override",
+                    "additionalProperties": {"type": "string"}
+                },
+                "libFile": {
+                    "type": "string",
+                    "description": "Explicit path to the .kicad_sym library file (skips auto-search)"
+                },
+                "hideReference": {
+                    "type": "boolean",
+                    "description": "Hide the Reference designator text. Default: false (visible).",
+                    "default": False
+                },
+                "hideValue": {
+                    "type": "boolean",
+                    "description": "Hide the Value text. Default: false (visible).",
+                    "default": False
+                }
+            },
+            "required": ["schematicPath", "reference", "newLibrary", "newSymbol"]
+        }
+    },
+    {
+        "name": "delete_schematic_component",
+        "title": "Delete Schematic Component",
+        "description": "Removes a placed symbol from the schematic by its reference designator.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "schematicPath": {
+                    "type": "string",
+                    "description": "Path to the .kicad_sch file"
+                },
+                "reference": {
+                    "type": "string",
+                    "description": "Reference designator of the component to remove (e.g. 'R1')"
+                }
+            },
+            "required": ["schematicPath", "reference"]
+        }
+    },
+    # ------------------------------------------------------------------
+    # Wiring
+    # ------------------------------------------------------------------
+    {
+        "name": "add_schematic_wire",
+        "title": "Add Wire",
+        "description": (
+            "Draws one or more wire segments on the schematic. "
+            "Provide a list of [x, y] waypoints; consecutive pairs become individual segments, "
+            "so [[0,0],[10,0],[10,10]] creates two right-angle segments. "
+            "Coordinates must match pin endpoints or existing wire endpoints exactly (KiCAD snaps to 1.27 mm grid)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "schematicPath": {
+                    "type": "string",
+                    "description": "Path to the .kicad_sch file"
+                },
                 "points": {
                     "type": "array",
-                    "description": "Array of [x, y] waypoints for the wire",
+                    "description": "Ordered list of [x, y] waypoints in mm",
                     "items": {
                         "type": "array",
                         "items": {"type": "number"},
@@ -1438,170 +1818,220 @@ SCHEMATIC_TOOLS = [
                     "minItems": 2
                 }
             },
-            "required": ["points"]
-        }
-    },
-    {
-        "name": "add_schematic_connection",
-        "title": "Add Junction/Connection Point",
-        "description": "Adds a junction (connection point) at the specified location on the schematic where wires cross and should connect.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "schematicPath": {
-                    "type": "string",
-                    "description": "Path to schematic file"
-                },
-                "x": {
-                    "type": "number",
-                    "description": "X coordinate on schematic"
-                },
-                "y": {
-                    "type": "number",
-                    "description": "Y coordinate on schematic"
-                }
-            },
-            "required": ["schematicPath", "x", "y"]
+            "required": ["schematicPath", "points"]
         }
     },
     {
         "name": "add_schematic_net_label",
         "title": "Add Net Label",
-        "description": "Adds a net label at exact coordinates on a schematic wire or pin endpoint. WARNING: x/y must match an existing wire endpoint or pin endpoint exactly — placing the label even 0.01mm away from a pin will result in an unconnected pin ERC error. To connect a component pin to a net by reference and pin number (recommended), use connect_to_net instead.",
+        "description": (
+            "Adds a net label at a wire endpoint or pin endpoint. "
+            "The x/y coordinates must coincide exactly with a wire end or pin — "
+            "use get_schematic_pin_locations to obtain precise pin coordinates. "
+            "Set global=true for labels that should be visible across multiple sheets."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "schematicPath": {
                     "type": "string",
-                    "description": "Path to schematic file"
+                    "description": "Path to the .kicad_sch file"
                 },
                 "netName": {
                     "type": "string",
-                    "description": "Name of the net (e.g., VCC, GND, SDA)"
+                    "description": "Net name (e.g. 'VCC', 'GND', 'SDA')"
                 },
                 "x": {
                     "type": "number",
-                    "description": "X coordinate on schematic"
+                    "description": "X coordinate in mm"
                 },
                 "y": {
                     "type": "number",
-                    "description": "Y coordinate on schematic"
+                    "description": "Y coordinate in mm"
                 },
                 "rotation": {
                     "type": "number",
-                    "description": "Rotation angle in degrees (0, 90, 180, 270)",
+                    "description": "Label rotation in degrees (0, 90, 180, 270). Default: 0",
                     "default": 0
+                },
+                "global": {
+                    "type": "boolean",
+                    "description": "If true, creates a global label (visible across sheets). Default: false",
+                    "default": False
                 }
             },
             "required": ["schematicPath", "netName", "x", "y"]
         }
     },
     {
-        "name": "connect_to_net",
-        "title": "Connect Pin to Net",
-        "description": "Intelligently connects a component pin to a named net, automatically routing wires as needed.",
+        "name": "add_schematic_junction",
+        "title": "Add Junction",
+        "description": "Adds a filled junction dot where two wires cross and should be electrically connected.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "schematicPath": {
                     "type": "string",
-                    "description": "Path to schematic file"
+                    "description": "Path to the .kicad_sch file"
                 },
-                "reference": {
-                    "type": "string",
-                    "description": "Component reference designator (e.g., R1, U3)"
+                "x": {
+                    "type": "number",
+                    "description": "X coordinate in mm"
                 },
-                "pinNumber": {
-                    "type": "string",
-                    "description": "Pin number or name on the component"
-                },
-                "netName": {
-                    "type": "string",
-                    "description": "Name of the net to connect to"
+                "y": {
+                    "type": "number",
+                    "description": "Y coordinate in mm"
                 }
             },
-            "required": ["schematicPath", "reference", "pinNumber", "netName"]
+            "required": ["schematicPath", "x", "y"]
         }
     },
     {
-        "name": "get_net_connections",
-        "title": "Get Net Connections",
-        "description": "Returns all components and pins connected to a specified net.",
+        "name": "add_schematic_no_connect",
+        "title": "Add No-Connect Flag",
+        "description": "Marks an unconnected pin with a no-connect flag (X) to suppress ERC warnings.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "schematicPath": {
                     "type": "string",
-                    "description": "Path to schematic file"
+                    "description": "Path to the .kicad_sch file"
                 },
-                "netName": {
-                    "type": "string",
-                    "description": "Name of the net to query"
+                "x": {
+                    "type": "number",
+                    "description": "X coordinate of the pin endpoint in mm"
+                },
+                "y": {
+                    "type": "number",
+                    "description": "Y coordinate of the pin endpoint in mm"
                 }
             },
-            "required": ["schematicPath", "netName"]
+            "required": ["schematicPath", "x", "y"]
         }
     },
+    # ------------------------------------------------------------------
+    # Inspection
+    # ------------------------------------------------------------------
     {
         "name": "get_schematic_pin_locations",
-        "title": "Get Schematic Pin Locations",
-        "description": "Returns the exact absolute coordinates of all pins on a schematic component. Use this BEFORE placing net labels with add_schematic_net_label to get the correct x/y position for each pin endpoint.",
+        "title": "Get Pin Locations",
+        "description": (
+            "Returns the absolute schematic coordinates of every pin on a placed component. "
+            "Always call this before adding wires or net labels, to get the exact x/y endpoint "
+            "for each pin. Accounts for the component's position, rotation, and mirror."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "schematicPath": {
                     "type": "string",
-                    "description": "Path to the schematic file"
+                    "description": "Path to the .kicad_sch file"
                 },
                 "reference": {
                     "type": "string",
-                    "description": "Component reference designator (e.g., U1, R1, J2)"
+                    "description": "Reference designator (e.g. 'R1', 'U3', 'J1')"
                 }
             },
             "required": ["schematicPath", "reference"]
         }
     },
+    # ------------------------------------------------------------------
+    # Annotation tools
+    # ------------------------------------------------------------------
     {
-        "name": "connect_passthrough",
-        "title": "Connect Passthrough (Pin-to-Pin)",
-        "description": "Connects all pins of a source connector to the matching pins of a target connector using shared net labels. Ideal for passthrough adapters where J1 pin N connects directly to J2 pin N. Each pair gets a net label '{netPrefix}_{pinNumber}'. Use this instead of calling connect_to_net 15 times for FFC/ribbon cable passthroughs. NOTE: KiCAD Connector_Generic symbols always have pin 1 at the TOP of the symbol and pin N at the BOTTOM. When assigning named nets (e.g. GND, CAM_SCL) to specific pin numbers, always use the physical pin number as shown in the connector datasheet — pin 1 = top of symbol.",
+        "name": "annotate_schematic",
+        "title": "Annotate Schematic Components",
+        "description": (
+            "Assigns sequential reference designators to schematic components "
+            "(e.g. R1, R2, C1, C2 …). "
+            "Power and flag symbols (#PWR, #FLG …) are always skipped. "
+            "Multi-unit components (e.g. dual op-amps) share the same base number. "
+            "Use onlyUnannotated=true to number only components that still show 'R?', "
+            "leaving already-annotated references intact. "
+            "For multi-sheet projects, pass the paths of already-annotated sheets in "
+            "existingSchematicPaths so that this sheet never reuses their numbers — "
+            "this replaces the need to manually set startNumber."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "schematicPath": {
                     "type": "string",
-                    "description": "Path to the schematic file"
+                    "description": "Absolute path to the .kicad_sch file to annotate"
                 },
-                "sourceRef": {
-                    "type": "string",
-                    "description": "Reference of the source connector (e.g., J1)"
+                "sortByPosition": {
+                    "type": "boolean",
+                    "description": "Sort components left-to-right then top-to-bottom before numbering (default: true)",
+                    "default": True
                 },
-                "targetRef": {
-                    "type": "string",
-                    "description": "Reference of the target connector (e.g., J2)"
+                "onlyUnannotated": {
+                    "type": "boolean",
+                    "description": "When true, only number components whose reference still contains '?' (default: false = full re-annotation)",
+                    "default": False
                 },
-                "netPrefix": {
-                    "type": "string",
-                    "description": "Prefix for generated net names, e.g. 'CSI' produces CSI_1, CSI_2, ... (default: PIN)"
-                },
-                "pinOffset": {
+                "startNumber": {
                     "type": "integer",
-                    "description": "Add this value to the pin number when building net names (default: 0)"
+                    "description": "First number to assign for each prefix group (default: 1). Ignored for any prefix whose numbers are already reserved via existingSchematicPaths.",
+                    "default": 1,
+                    "minimum": 0
+                },
+                "skipPrefixes": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of reference prefixes to leave unchanged, e.g. ['U', 'J']"
+                },
+                "existingSchematicPaths": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Paths to already-annotated sibling schematic sheets. "
+                        "Their reference numbers are pre-reserved so this sheet "
+                        "never generates duplicates. Use this instead of startNumber "
+                        "for multi-sheet projects."
+                    )
                 }
             },
-            "required": ["schematicPath", "sourceRef", "targetRef"]
+            "required": ["schematicPath"]
         }
     },
     {
-        "name": "run_erc",
-        "title": "Run Electrical Rules Check (ERC)",
-        "description": "Runs the KiCAD Electrical Rules Check (ERC) on a schematic via kicad-cli and returns all violations with type, severity, and location. Use this to verify the schematic is electrically correct before generating a netlist or exporting.",
+        "name": "clear_annotation",
+        "title": "Clear Schematic Annotation",
+        "description": (
+            "Resets reference designators back to the unannotated 'X?' form "
+            "(e.g. R1 → R?, C12 → C?). "
+            "Power and flag symbols are never touched. "
+            "Use the prefixes parameter to restrict clearing to specific component types."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "schematicPath": {
                     "type": "string",
-                    "description": "Path to the .kicad_sch schematic file"
+                    "description": "Absolute path to the .kicad_sch file"
+                },
+                "prefixes": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "If provided, only clear references with these prefixes, e.g. ['R', 'C']. Omit to clear all components."
+                }
+            },
+            "required": ["schematicPath"]
+        }
+    },
+    # ------------------------------------------------------------------
+    # ERC / export / sync  (unchanged from previous implementation)
+    # ------------------------------------------------------------------
+    {
+        "name": "run_erc",
+        "title": "Run Electrical Rules Check (ERC)",
+        "description": "Runs KiCAD ERC via kicad-cli and returns all violations with type, severity, and location.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "schematicPath": {
+                    "type": "string",
+                    "description": "Path to the .kicad_sch file"
                 }
             },
             "required": ["schematicPath"]
@@ -1609,18 +2039,18 @@ SCHEMATIC_TOOLS = [
     },
     {
         "name": "sync_schematic_to_board",
-        "title": "Sync Schematic to PCB (F8)",
-        "description": "Reads net connections from the schematic and assigns them to matching component pads in the PCB board file. Equivalent to KiCAD Pcbnew F8 'Update PCB from Schematic'. Must be called after placing components and before routing traces, so that pad-to-net assignments are correct.",
+        "title": "Sync Schematic to PCB",
+        "description": "Reads net connections from the schematic and assigns them to matching footprint pads in the PCB file. Run this after completing the schematic and before routing traces.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "schematicPath": {
                     "type": "string",
-                    "description": "Path to .kicad_sch file. If omitted, auto-detected from current board path."
+                    "description": "Path to .kicad_sch file (auto-detected from board path if omitted)"
                 },
                 "boardPath": {
                     "type": "string",
-                    "description": "Path to .kicad_pcb file. If omitted, uses currently loaded board."
+                    "description": "Path to .kicad_pcb file (uses currently loaded board if omitted)"
                 }
             }
         }
@@ -1628,22 +2058,22 @@ SCHEMATIC_TOOLS = [
     {
         "name": "generate_netlist",
         "title": "Generate Netlist",
-        "description": "Generates a netlist from the schematic showing all components and their net connections.",
+        "description": "Generates a netlist from the schematic showing all components and net connections.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "schematicPath": {
                     "type": "string",
-                    "description": "Path to schematic file"
+                    "description": "Path to the .kicad_sch file"
                 },
                 "outputPath": {
                     "type": "string",
-                    "description": "Optional path to save netlist file"
+                    "description": "Optional path to save the netlist file"
                 },
                 "format": {
                     "type": "string",
                     "enum": ["kicad", "json", "spice"],
-                    "description": "Netlist output format",
+                    "description": "Netlist format (default: json)",
                     "default": "json"
                 }
             },
@@ -1653,68 +2083,32 @@ SCHEMATIC_TOOLS = [
     {
         "name": "list_schematic_libraries",
         "title": "List Symbol Libraries",
-        "description": "Lists all available symbol libraries for schematic design.",
+        "description": "Lists all available KiCAD symbol libraries found in the standard search paths.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "searchPaths": {
                     "type": "array",
-                    "description": "Optional additional paths to search for libraries",
+                    "description": "Additional paths to search for .kicad_sym files",
                     "items": {"type": "string"}
                 }
             }
         }
     },
     {
-        "name": "edit_schematic_component",
-        "title": "Edit Schematic Component Properties",
-        "description": "Updates properties of a placed symbol in a schematic. Supports standard fields (value, footprint, reference) and arbitrary custom fields (e.g. LCSC Part, Manufacturer Part). Existing fields are updated in-place; new fields are appended as hidden properties.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "schematicPath": {
-                    "type": "string",
-                    "description": "Absolute path to the .kicad_sch file"
-                },
-                "reference": {
-                    "type": "string",
-                    "description": "Reference designator of the component to edit (e.g. R1, U3)"
-                },
-                "value": {
-                    "type": "string",
-                    "description": "New Value field (e.g. 10k, STM32F401)"
-                },
-                "footprint": {
-                    "type": "string",
-                    "description": "New Footprint field (library:name)"
-                },
-                "newReference": {
-                    "type": "string",
-                    "description": "New reference designator (renames the component)"
-                },
-                "properties": {
-                    "type": "object",
-                    "description": "Arbitrary custom fields to set (e.g. {\"LCSC Part\": \"C25768\", \"Manufacturer Part\": \"0402WGF2202TCE\"}). Existing fields are updated; missing fields are created as hidden.",
-                    "additionalProperties": {"type": "string"}
-                }
-            },
-            "required": ["schematicPath", "reference"]
-        }
-    },
-    {
         "name": "export_schematic_pdf",
         "title": "Export Schematic to PDF",
-        "description": "Exports the schematic as a PDF document for printing or documentation.",
+        "description": "Exports the schematic as a PDF file using kicad-cli.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "schematicPath": {
                     "type": "string",
-                    "description": "Path to schematic file"
+                    "description": "Path to the .kicad_sch file"
                 },
                 "outputPath": {
                     "type": "string",
-                    "description": "Path for output PDF"
+                    "description": "Destination path for the PDF"
                 }
             },
             "required": ["schematicPath", "outputPath"]

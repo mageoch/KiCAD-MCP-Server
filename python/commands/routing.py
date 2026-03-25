@@ -49,9 +49,17 @@ class RoutingCommands:
 
             # Set net class if provided
             if net_class:
-                net_classes = self.board.GetNetClasses()
-                if net_classes.Find(net_class):
-                    net.SetClass(net_classes.Find(net_class))
+                net_settings = getattr(self.board.GetDesignSettings(), "m_NetSettings", None)
+                if net_settings and hasattr(net_settings, "HasNetclass"):
+                    nc = net_settings.GetNetClassByName(net_class) if net_settings.HasNetclass(net_class) else None
+                else:
+                    nc_map = self.board.GetNetClasses()
+                    try:
+                        nc = nc_map.Find(net_class)
+                    except AttributeError:
+                        nc = nc_map[net_class] if net_class in nc_map else None
+                if nc:
+                    net.SetClass(nc)
 
             return {
                 "success": True,
@@ -1014,7 +1022,7 @@ class RoutingCommands:
 
             name = params.get("name")
             clearance = params.get("clearance")
-            track_width = params.get("trackWidth")
+            track_width = params.get("traceWidth") or params.get("trackWidth")
             via_diameter = params.get("viaDiameter")
             via_drill = params.get("viaDrill")
             uvia_diameter = params.get("uviaDiameter")
@@ -1030,58 +1038,87 @@ class RoutingCommands:
                     "errorDetails": "name parameter is required",
                 }
 
-            # Get net classes
-            net_classes = self.board.GetNetClasses()
+            # Resolve net class via NET_SETTINGS (KiCAD 9) or legacy GetNetClasses() (KiCAD 7/8)
+            net_settings = getattr(self.board.GetDesignSettings(), "m_NetSettings", None)
 
-            # Create new net class if it doesn't exist
-            if not net_classes.Find(name):
+            def _nc_find(nc_name):
+                if net_settings and hasattr(net_settings, "HasNetclass"):
+                    if net_settings.HasNetclass(nc_name):
+                        return net_settings.GetNetClassByName(nc_name)
+                    return None
+                # Legacy KiCAD 7/8
+                nc_map = self.board.GetNetClasses()
+                try:
+                    return nc_map.Find(nc_name)
+                except AttributeError:
+                    return nc_map[nc_name] if nc_name in nc_map else None
+
+            def _nc_add(nc_obj):
+                if net_settings and hasattr(net_settings, "SetNetclass"):
+                    net_settings.SetNetclass(nc_obj.GetName(), nc_obj)
+                else:
+                    # Legacy KiCAD 7/8
+                    nc_map = self.board.GetNetClasses()
+                    try:
+                        nc_map.Add(nc_obj)
+                    except AttributeError:
+                        nc_map[nc_obj.GetName()] = nc_obj
+
+            # Create or update the net class
+            existing = _nc_find(name)
+            if not existing:
                 netclass = pcbnew.NETCLASS(name)
-                net_classes.Add(netclass)
+                _nc_add(netclass)
             else:
-                netclass = net_classes.Find(name)
+                netclass = existing
 
-            # Set properties
+            # Set properties — some methods removed in KiCAD 9 (e.g. MicroVia*)
             scale = 1000000  # mm to nm
-            if clearance is not None:
-                netclass.SetClearance(int(clearance * scale))
-            if track_width is not None:
-                netclass.SetTrackWidth(int(track_width * scale))
-            if via_diameter is not None:
-                netclass.SetViaDiameter(int(via_diameter * scale))
-            if via_drill is not None:
-                netclass.SetViaDrill(int(via_drill * scale))
-            if uvia_diameter is not None:
-                netclass.SetMicroViaDiameter(int(uvia_diameter * scale))
-            if uvia_drill is not None:
-                netclass.SetMicroViaDrill(int(uvia_drill * scale))
-            if diff_pair_width is not None:
-                netclass.SetDiffPairWidth(int(diff_pair_width * scale))
-            if diff_pair_gap is not None:
-                netclass.SetDiffPairGap(int(diff_pair_gap * scale))
+
+            def _nc_set(obj, setter, value):
+                fn = getattr(obj, setter, None)
+                if fn is not None and value is not None:
+                    fn(int(value * scale))
+
+            def _nc_get(obj, getter):
+                fn = getattr(obj, getter, None)
+                return fn() / scale if fn is not None else None
+
+            _nc_set(netclass, "SetClearance", clearance)
+            _nc_set(netclass, "SetTrackWidth", track_width)
+            _nc_set(netclass, "SetViaDiameter", via_diameter)
+            _nc_set(netclass, "SetViaDrill", via_drill)
+            _nc_set(netclass, "SetMicroViaDiameter", uvia_diameter)
+            _nc_set(netclass, "SetMicroViaDrill", uvia_drill)
+            _nc_set(netclass, "SetDiffPairWidth", diff_pair_width)
+            _nc_set(netclass, "SetDiffPairGap", diff_pair_gap)
 
             # Add nets to net class
             netinfo = self.board.GetNetInfo()
             nets_map = netinfo.NetsByName()
             for net_name in nets:
-                if nets_map.has_key(net_name):
+                if net_name in nets_map:
                     net = nets_map[net_name]
                     net.SetClass(netclass)
 
+            nc_info = {
+                "name": name,
+                "clearance": _nc_get(netclass, "GetClearance"),
+                "trackWidth": _nc_get(netclass, "GetTrackWidth"),
+                "viaDiameter": _nc_get(netclass, "GetViaDiameter"),
+                "viaDrill": _nc_get(netclass, "GetViaDrill"),
+                "uviaDiameter": _nc_get(netclass, "GetMicroViaDiameter"),
+                "uviaDrill": _nc_get(netclass, "GetMicroViaDrill"),
+                "diffPairWidth": _nc_get(netclass, "GetDiffPairWidth"),
+                "diffPairGap": _nc_get(netclass, "GetDiffPairGap"),
+                "nets": nets,
+            }
+            # Strip None values for cleaner output
+            nc_info = {k: v for k, v in nc_info.items() if v is not None or k in ("name", "nets")}
             return {
                 "success": True,
                 "message": f"Created net class: {name}",
-                "netClass": {
-                    "name": name,
-                    "clearance": netclass.GetClearance() / scale,
-                    "trackWidth": netclass.GetTrackWidth() / scale,
-                    "viaDiameter": netclass.GetViaDiameter() / scale,
-                    "viaDrill": netclass.GetViaDrill() / scale,
-                    "uviaDiameter": netclass.GetMicroViaDiameter() / scale,
-                    "uviaDrill": netclass.GetMicroViaDrill() / scale,
-                    "diffPairWidth": netclass.GetDiffPairWidth() / scale,
-                    "diffPairGap": netclass.GetDiffPairGap() / scale,
-                    "nets": nets,
-                },
+                "netClass": nc_info,
             }
 
         except Exception as e:
@@ -1091,6 +1128,82 @@ class RoutingCommands:
                 "message": "Failed to create net class",
                 "errorDetails": str(e),
             }
+
+    def assign_net_to_class(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Assign one or more existing nets to a net class"""
+        try:
+            if not self.board:
+                return {"success": False, "message": "No board loaded"}
+
+            nets = params.get("nets", [])
+            netclass_name = params.get("netClass") or params.get("netclass")
+
+            if not nets:
+                return {"success": False, "message": "nets parameter is required (list of net names)"}
+            if not netclass_name:
+                return {"success": False, "message": "netClass parameter is required"}
+
+            # Resolve the net class object (KiCAD 9 vs legacy)
+            net_settings = getattr(self.board.GetDesignSettings(), "m_NetSettings", None)
+            if net_settings and hasattr(net_settings, "HasNetclass"):
+                netclass = net_settings.GetNetClassByName(netclass_name) if net_settings.HasNetclass(netclass_name) else None
+            else:
+                nc_map = self.board.GetNetClasses()
+                try:
+                    netclass = nc_map.Find(netclass_name)
+                except AttributeError:
+                    netclass = nc_map[netclass_name] if netclass_name in nc_map else None
+
+            if not netclass:
+                return {
+                    "success": False,
+                    "message": f"Net class '{netclass_name}' not found — create it first with create_netclass",
+                }
+
+            # Assign each net via NET_SETTINGS label assignments (KiCAD 9)
+            # or NETINFO_ITEM.SetClass() (KiCAD 7/8)
+            assigned = []
+            not_found = []
+
+            if net_settings and hasattr(net_settings, "SetNetclassLabelAssignment"):
+                # KiCAD 9: assign net → netclass via label assignment
+                board_net_names = {
+                    n.GetNetname()
+                    for n in self.board.GetNetInfo().NetsByNetcode().values()
+                }
+                for net_name in nets:
+                    if net_name in board_net_names:
+                        ss = pcbnew.STRINGSET()
+                        ss.add(netclass_name)
+                        net_settings.SetNetclassLabelAssignment(net_name, ss)
+                        assigned.append(net_name)
+                    else:
+                        not_found.append(net_name)
+                if hasattr(net_settings, "RecomputeEffectiveNetclasses"):
+                    net_settings.RecomputeEffectiveNetclasses()
+            else:
+                # Legacy KiCAD 7/8
+                netinfo = self.board.GetNetInfo()
+                nets_map = netinfo.NetsByName()
+                for net_name in nets:
+                    if net_name in nets_map:
+                        nets_map[net_name].SetClass(netclass)
+                        assigned.append(net_name)
+                    else:
+                        not_found.append(net_name)
+
+            pcbnew.Refresh()
+
+            return {
+                "success": True,
+                "message": f"Assigned {len(assigned)} net(s) to class '{netclass_name}'",
+                "assigned": assigned,
+                "notFound": not_found,
+            }
+
+        except Exception as e:
+            logger.error(f"Error assigning nets to class: {str(e)}")
+            return {"success": False, "message": "Failed to assign nets", "errorDetails": str(e)}
 
     def add_copper_pour(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Add a copper pour (zone) to the PCB"""
