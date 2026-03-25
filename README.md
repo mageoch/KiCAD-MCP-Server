@@ -229,4 +229,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines.
 
 MIT — see [LICENSE](LICENSE).
 
-Originally created by [mixelpixx](https://github.com/mixelpixx/KiCAD-MCP-Server). Maintained by [mageoch](https://github.com/mageoch).
+Originally created by [mixelpixx](https://github.com/mixelpixx/KiCAD-MCP-Server). Maintained by [@mageo](https://github.com/mageo) / [mageoch](https://github.com/mageoch).
