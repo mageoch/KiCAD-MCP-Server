@@ -11,7 +11,7 @@ A [Model Context Protocol](https://modelcontextprotocol.io/) server that lets AI
 - **64 tools** covering the full PCB design workflow: projects, board layout, component placement, routing, schematics, DRC, and exports
 - **Dynamic symbol loading** — access all ~10,000 KiCAD symbols from standard libraries, no manual import needed
 - **Intelligent schematic wiring** — automatic pin location, rotation-aware routing, power symbol support
-- **JLCPCB parts integration** — search 2.5M+ components with parametric filters, live pricing, and stock data
+- **BOM export** with LCSC part number extraction from schematic fields
 - **IPC backend** (experimental) — real-time sync with a running KiCAD instance via the KiCAD 9.0 IPC API
 - **Tool router** — organises 64 tools into discoverable categories so the AI only loads what it needs (~70% less context)
 
@@ -126,9 +126,6 @@ No extra configuration needed — the server detects IPC automatically and falls
 ### Library (6)
 `list_libraries` · `search_footprints` · `list_library_footprints` · `get_footprint_info` · `list_symbol_libraries` · `search_symbols`
 
-### JLCPCB (5)
-`download_jlcpcb_database` · `search_jlcpcb_parts` · `get_jlcpcb_part` · `get_jlcpcb_database_stats` · `suggest_jlcpcb_alternatives`
-
 ### Design rules (4)
 `set_design_rules` · `get_design_rules` · `run_drc` · `get_drc_violations`
 
@@ -143,23 +140,11 @@ No extra configuration needed — the server detects IPC automatically and falls
 
 ---
 
-## JLCPCB parts integration
+## LCSC/JLCPCB component search
 
-The server can search the JLCPCB assembly catalog for component selection and cost optimisation.
+Component search and catalog access have been moved to the companion [LCSC-MCP-Server](https://github.com/mageoch/LCSC-MCP-Server), which provides parametric search across 2.5M+ JLCPCB parts, live pricing, stock data, and KiCAD file downloads.
 
-**No credentials needed for most use cases.** The public JLCSearch API gives access to 2.5M+ parts with pricing and stock data.
-
-Download the local database (one-time, supports resume if interrupted):
-```
-Ask Claude: "Download the JLCPCB parts database"
-```
-
-Find Basic parts (no assembly surcharge) in a specific package:
-```
-Find a 10kΩ 0402 Basic resistor for JLCPCB assembly
-```
-
-For real-time pricing and the full JLCPCB API, set `JLCPCB_APP_ID`, `JLCPCB_API_KEY`, and `JLCPCB_API_SECRET` — see [docs/JLCPCB_USAGE_GUIDE.md](docs/JLCPCB_USAGE_GUIDE.md).
+This server handles the PCB/schematic side — `export_bom` includes LCSC part numbers extracted from schematic component properties, ready to use with JLCPCB's assembly service.
 
 ---
 
