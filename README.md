@@ -1,5 +1,7 @@
 # KiCAD MCP Server
 
+[![Built with Claude Code](https://img.shields.io/badge/built%20with-Claude%20Code-blueviolet?logo=anthropic&logoColor=white)](https://claude.ai/code)
+
 A [Model Context Protocol](https://modelcontextprotocol.io/) server that lets AI assistants control KiCAD for PCB design automation. Describe what you want in plain language — the server handles the rest.
 
 > **Fork of [mixelpixx/KiCAD-MCP-Server](https://github.com/mixelpixx/KiCAD-MCP-Server)**
