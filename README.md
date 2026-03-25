@@ -2,7 +2,27 @@
 
 A [Model Context Protocol](https://modelcontextprotocol.io/) server that lets AI assistants control KiCAD for PCB design automation. Describe what you want in plain language — the server handles the rest.
 
-> **Fork of [mixelpixx/KiCAD-MCP-Server](https://github.com/mixelpixx/KiCAD-MCP-Server)** — Python-only rewrite with expanded schematic support, kiutils integration, and improved tool schemas.
+> **Fork of [mixelpixx/KiCAD-MCP-Server](https://github.com/mixelpixx/KiCAD-MCP-Server)**
+
+## Changes from the original
+
+**Architecture**
+- Removed the TypeScript/Node.js layer entirely — the server now runs as a pure Python process via `uv`, with no build step required
+- Simplified `kicad_interface.py` — leaner message routing, easier to extend
+
+**Schematic support**
+- Added `kiutils` integration (`schematic_kiutils.py`) for structured, in-memory schematic manipulation — no raw S-expression editing
+- Improved pin locator and wire manager for more reliable schematic wiring
+
+**Routing**
+- Significant rework of the routing engine for better trace and differential pair handling
+
+**Tool schemas**
+- Comprehensive rewrite of all JSON Schema definitions — stricter types, better parameter descriptions, improved validation
+
+**Component search**
+- Removed the built-in JLCPCB catalog search tools — these have been extracted into the dedicated [LCSC-MCP-Server](https://github.com/mageoch/LCSC-MCP-Server), which provides richer parametric search, live pricing, and KiCAD file downloads
+- Retained LCSC part number extraction from schematic fields in `export_bom`
 
 ---
 
