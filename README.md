@@ -206,7 +206,7 @@ Bug reports, feature requests, and pull requests are welcome.
 2. Fork the repo and create a branch
 3. Submit a PR with a clear description
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines.
+See [GitHub Issues](https://github.com/mageoch/KiCAD-MCP-Server/issues) to report bugs or request features.
 
 ---
 
